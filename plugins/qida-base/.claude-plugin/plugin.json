@@ -1,6 +1,6 @@
 {
   "name": "qida-base",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "QidaBase local-dev commands: faker dev stack and ScreeningCall DB operations",
   "author": {
     "name": "Qida",

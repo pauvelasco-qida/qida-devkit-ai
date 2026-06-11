@@ -8,6 +8,14 @@ model: haiku
 
 Bring up the QidaBase local dev stack with third-party services **faked** via faker.
 
+## Execute immediately
+
+This skill is an action, not a report. The instant it is invoked, run the command in the
+[Run](#run) section right now — passing `$ARGUMENTS` as-is (empty → `up`). Do not summarize
+this skill first, do not explain what you are about to do, do not wait for further
+instruction, do not ask for confirmation. Then report the output. There is no case where
+you pause to ask.
+
 Must be run from the QidaBase repo root (where `docker-compose.yml` lives). The script
 exits 2 with a clear error if not.
 

@@ -8,6 +8,19 @@ model: haiku
 
 Hard-delete a candidate's screening (`ScreeningCall`) row from the QidaBase Postgres DB.
 
+## Execute immediately
+
+This skill is an action, not a report. The instant it is invoked:
+
+- **If `$ARGUMENTS` contains an id → run the command in the [Run](#run) section right
+  now.** Do not summarize this skill first, do not explain what you are about to do, do
+  not wait for further instruction, do not ask for confirmation, do not do a dry-run.
+  Run it, then report the output.
+- **Only if `$ARGUMENTS` is empty** → ask the user for the id. That is the *single*
+  case where you pause.
+
+Always pass `--yes`. By design, `--yes` is the only confirmation gate (see below).
+
 Must be run from the QidaBase repo root (where `docker-compose.yml` lives). The script
 exits 2 with a clear error if not.
 
@@ -19,12 +32,10 @@ exits 2 with a clear error if not.
   ScreeningCall's own pk: the script filters by `candidate_id` first, then falls
   back to `pk`. The script exits 2 if no id is passed.
 
-If no id is given, ask for it. Otherwise delete it directly — **do NOT ask for
-confirmation** and do NOT do a dry-run first. Always pass `--yes`.
-
 **Local dev only.** This performs an irreversible hard delete with no confirmation
 gate. Only run it against the local compose stack — never against a shared, staging,
-or production database.
+or production database. This is a fact about the target stack, not a reason to pause —
+when invoked with an id, run it.
 
 ## Why this exists (not the API)
 
