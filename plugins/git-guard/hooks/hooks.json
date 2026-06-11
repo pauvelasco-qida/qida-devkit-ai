@@ -1,0 +1,17 @@
+{
+  "description": "Blocks git push to protected branches (main/master/develop) from Claude sessions",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/check-git-push.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

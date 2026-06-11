@@ -1,0 +1,19 @@
+#!/bin/sh
+# git-guard pre-push hook: blocks direct pushes to protected branches.
+# Installed by /git-guard:protect from the qida-devkit-ai marketplace.
+# Protected branches: $GIT_GUARD_PROTECTED (space-separated), default "main master develop".
+
+protected="${GIT_GUARD_PROTECTED:-main master develop}"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  for branch in $protected; do
+    if [ "$remote_ref" = "refs/heads/$branch" ]; then
+      echo "git-guard: direct push to '$branch' is blocked." >&2
+      echo "  Create a branch and open a PR:" >&2
+      echo "    git checkout -b my-change && git push -u origin my-change" >&2
+      exit 1
+    fi
+  done
+done
+
+exit 0

@@ -17,6 +17,12 @@
       "description": "QidaBase local-dev commands: faker dev stack and ScreeningCall DB operations",
       "source": "./plugins/qida-base",
       "category": "development"
+    },
+    {
+      "name": "git-guard",
+      "description": "Branch protection: blocks pushes to main/master/develop from Claude and installs a reusable git pre-push hook",
+      "source": "./plugins/git-guard",
+      "category": "development"
     }
   ]
 }
