@@ -1,6 +1,6 @@
 {
   "name": "qida-dev",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Core development conventions and commands for Qida apps",
   "author": {
     "name": "Qida",
