@@ -1,5 +1,4 @@
 {
-  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "qida-devkit-ai",
   "description": "Internal marketplace of Claude Code plugins for Qida app development",
   "owner": {
@@ -11,6 +10,12 @@
       "name": "qida-dev",
       "description": "Core development conventions and commands for Qida apps",
       "source": "./plugins/qida-dev",
+      "category": "development"
+    },
+    {
+      "name": "qida-base",
+      "description": "QidaBase local-dev commands: faker dev stack and ScreeningCall DB operations",
+      "source": "./plugins/qida-base",
       "category": "development"
     }
   ]

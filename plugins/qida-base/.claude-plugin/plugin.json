@@ -1,0 +1,11 @@
+{
+  "name": "qida-base",
+  "version": "0.1.0",
+  "description": "QidaBase local-dev commands: faker dev stack and ScreeningCall DB operations",
+  "author": {
+    "name": "Qida",
+    "email": "pau.velasco@qida.es"
+  },
+  "license": "UNLICENSED",
+  "keywords": ["qida", "qidabase", "django", "screening", "faker"]
+}
