@@ -8,6 +8,18 @@ model: haiku
 
 Update fields of a `ScreeningCall` row in the QidaBase Postgres DB.
 
+## Execute immediately
+
+This skill is an action, not a report. The instant it is invoked:
+
+- **If `$ARGUMENTS` has an id AND at least one `field=value` → run the command in the
+  [Run](#run) section right now.** Do not summarize this skill first, do not explain what
+  you are about to do, do not wait for further instruction, do not ask for confirmation.
+  If `--dry-run` is among the args, that *is* the dry-run — run it as given; otherwise run
+  the real update. Then report the output.
+- **Only if the id or the `field=value` pair is missing** → ask the user for what's
+  missing. That is the single case where you pause.
+
 Must be run from the QidaBase repo root (where `docker-compose.yml` lives). The script
 exits 2 with a clear error if not.
 
