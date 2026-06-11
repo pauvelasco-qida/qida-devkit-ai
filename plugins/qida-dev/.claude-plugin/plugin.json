@@ -1,0 +1,11 @@
+{
+  "name": "qida-dev",
+  "version": "0.1.0",
+  "description": "Core development conventions and commands for Qida apps",
+  "author": {
+    "name": "Qida",
+    "email": "pau.velasco@qida.es"
+  },
+  "license": "UNLICENSED",
+  "keywords": ["qida", "development"]
+}
