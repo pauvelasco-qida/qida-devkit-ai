@@ -1,6 +1,6 @@
 {
   "name": "git-guard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Protects main/master/develop branches: blocks Claude from pushing to them and installs a reusable git pre-push hook for manual pushes",
   "author": {
     "name": "Qida",

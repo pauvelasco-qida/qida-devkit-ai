@@ -19,13 +19,32 @@ Two layers:
 
 ## Configuration
 
-Protected branches default to `main master develop`. Override with a space-separated env var:
+Protected branches default to `main master develop`. Two ways to override, by precedence:
+
+### 1. Per-project settings file (Claude-side hook only)
+
+Create `.claude/git-guard.local.md` in the project root:
+
+```markdown
+---
+enabled: true
+protected_branches: main master develop release
+---
+```
+
+- `enabled: false` disables the Claude-side check for this project.
+- `protected_branches` is space-separated and **replaces** the env var and default list.
+- Add `.claude/*.local.md` to your `.gitignore` — this file is per-user, not shared.
+
+The settings file is read on every push attempt, so changes take effect immediately (no restart needed).
+
+### 2. Environment variable (both layers)
 
 ```bash
 export GIT_GUARD_PROTECTED="main master develop release"
 ```
 
-Applies to both the Claude-side hook and the installed pre-push hook.
+Applies to both the Claude-side hook and the installed pre-push hook. The settings file, when present, wins over the env var for the Claude-side hook; the terminal-side pre-push hook only reads the env var.
 
 ## Limitations
 

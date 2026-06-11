@@ -51,7 +51,7 @@ do_delete = os.environ.get("DO_DELETE") == "1"
 try:
     uuid.UUID(ident)
 except ValueError:
-    print(f"{ident!r} is not a valid UUID. Nothing to delete.")
+    raise SystemExit(f"{ident!r} is not a valid UUID. Nothing to delete.")
 else:
     qs = ScreeningCall.objects.filter(candidate_id=ident)
     match_kind = "candidate_id"
@@ -61,7 +61,7 @@ else:
 
     sc = qs.first()
     if sc is None:
-        print(f"No ScreeningCall found for id {ident} (tried candidate_id and pk). Nothing to delete.")
+        raise SystemExit(f"No ScreeningCall found for id {ident} (tried candidate_id and pk). Nothing to delete.")
     else:
         print(f"Found ScreeningCall by {match_kind}: id={sc.id} candidate={sc.candidate_id} status={sc.status} triggered_at={sc.triggered_at}")
         if do_delete:

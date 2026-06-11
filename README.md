@@ -21,16 +21,16 @@ qida-devkit-ai/
 
 ## Install the marketplace
 
-From a local clone:
+From GitHub:
 
 ```
-/plugin marketplace add /Users/pau.velasco_qida/Documents/qida-devkit-ai
+/plugin marketplace add pauvelasco-qida/qida-devkit-ai
 ```
 
-Or once pushed to GitHub:
+Or from a local clone:
 
 ```
-/plugin marketplace add qida/qida-devkit-ai
+/plugin marketplace add <path-to-your-clone-of-qida-devkit-ai>
 ```
 
 Then install plugins:
@@ -59,3 +59,5 @@ Verify with `/hello-qida`.
 | Plugin | Description |
 |---|---|
 | `qida-dev` | Core development conventions and commands for Qida apps |
+| `qida-base` | QidaBase local-dev commands: faker dev stack and ScreeningCall DB operations |
+| `git-guard` | Branch protection: blocks pushes to main/master/develop from Claude and installs a reusable git pre-push hook |
