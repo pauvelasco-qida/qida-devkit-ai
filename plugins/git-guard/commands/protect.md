@@ -1,4 +1,5 @@
 ---
+name: protect
 description: Install the git-guard pre-push hook in the current repo (optionally also a GitHub ruleset)
 argument-hint: "[--ruleset]"
 allowed-tools: ["Bash", "Read"]
