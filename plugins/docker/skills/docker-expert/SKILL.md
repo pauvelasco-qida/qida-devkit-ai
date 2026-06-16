@@ -8,17 +8,18 @@ Advanced Docker containerization expertise covering Dockerfile optimization, sec
 
 ## Scope Boundaries
 
-Delegate immediately if the task is primarily:
+Stop and flag if the task is primarily outside Docker containerization:
 
-- **Kubernetes** (pods, services, ingress, deployments) → `kubernetes-expert`
-- **GitHub Actions CI/CD** with containers → `github-actions-expert`
-- **AWS ECS/Fargate** or cloud-specific container services → `devops-expert`
-- **Database containerization** with complex persistence strategies → `database-expert`
+- **Kubernetes** (pods, services, ingress, deployments)
+- **GitHub Actions CI/CD** pipeline logic beyond the container build step
+- **AWS ECS/Fargate** or cloud-specific container services
+- **Database persistence strategies** beyond basic containerization
 
-Output format when delegating:
+Output format:
 ```
-This requires [X] expertise. Invoke: 'Use the [expert-name] skill.' Stopping here.
+This is primarily a [X] task, outside Docker scope. [Docker-relevant note, if any.]
 ```
+If a matching expert skill is available in the environment, suggest it; otherwise just flag the boundary.
 
 ## Environment Analysis
 
