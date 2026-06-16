@@ -1,0 +1,11 @@
+{
+  "name": "docker",
+  "version": "0.1.0",
+  "description": "Docker containerization expertise: Dockerfile optimization, security hardening, multi-stage builds, Compose orchestration, and production deployment patterns",
+  "author": {
+    "name": "Qida",
+    "email": "pau.velasco@qida.es"
+  },
+  "license": "UNLICENSED",
+  "keywords": ["docker", "containers", "dockerfile", "docker-compose", "devops", "containerization"]
+}

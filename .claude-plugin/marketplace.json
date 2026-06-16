@@ -20,9 +20,15 @@
     },
     {
       "name": "git-guard",
-      "description": "Branch protection: blocks pushes to main/master/develop from Claude and installs a reusable git pre-push hook",
+      "description": "Protects main/master/develop branches: blocks Claude from pushing to them and installs a reusable git pre-push hook for manual pushes",
       "source": "./plugins/git-guard",
       "category": "development"
+    },
+    {
+      "name": "docker",
+      "description": "Docker containerization expertise: Dockerfile optimization, security hardening, multi-stage builds, Compose orchestration, and production deployment patterns",
+      "source": "./plugins/docker",
+      "category": "devops"
     }
   ]
 }
