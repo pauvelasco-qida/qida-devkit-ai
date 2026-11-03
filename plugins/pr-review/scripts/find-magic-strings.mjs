@@ -12,7 +12,6 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
   classifySyntax,
@@ -22,6 +21,7 @@ import {
   shapeOf,
   staticLength,
 } from './lib/classify.mjs';
+import { runIfMain, scriptKind, sortBy } from './lib/cli.mjs';
 import { isScannedExtension, loadConfig, skipReason } from './lib/config.mjs';
 import { ScannerError } from './lib/errors.mjs';
 import { changedFiles, fileAtCommit, grepFiles, headInfo, mergeBase, repoRoot, resolveBaseRef } from './lib/git.mjs';
@@ -91,32 +91,6 @@ Options:
  * @property {boolean} redacted
  * @property {{ name: string, file: string, line: number }[]} existing
  */
-
-/**
- * @param {string} rel
- * @param {TS} ts
- * @returns {import('typescript').ScriptKind}
- */
-function scriptKind(rel, ts) {
-  if (rel.endsWith('.tsx')) return ts.ScriptKind.TSX;
-  if (rel.endsWith('.jsx')) return ts.ScriptKind.JSX;
-  if (/\.[mc]?js$/.test(rel)) return ts.ScriptKind.JS;
-  return ts.ScriptKind.TS;
-}
-
-/**
- * @template T
- * @param {T[]} list
- * @param {(x: T) => string} key
- * @returns {T[]}
- */
-function sortBy(list, key) {
-  return [...list].sort((a, b) => {
-    const ka = key(a);
-    const kb = key(b);
-    return ka < kb ? -1 : ka > kb ? 1 : 0;
-  });
-}
 
 /**
  * @param {Literal} lit
@@ -455,37 +429,4 @@ export function run(argv) {
   return report;
 }
 
-function main() {
-  try {
-    const out = run(process.argv.slice(2));
-    if ('help' in out) {
-      process.stdout.write(String(out.help));
-      return;
-    }
-    process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
-  } catch (e) {
-    if (e instanceof ScannerError) {
-      process.stdout.write(`${JSON.stringify({ error: { code: e.code, message: e.message, hint: e.hint } }, null, 2)}\n`);
-      process.exitCode = e.exitCode;
-      return;
-    }
-    const err = /** @type {Error} */ (e);
-    process.stdout.write(`${JSON.stringify({ error: { code: 'INTERNAL', message: err.message, hint: null } }, null, 2)}\n`);
-    process.stderr.write(`${err.stack ?? err.message}\n`);
-    process.exitCode = 1;
-  }
-}
-
-/**
- * @param {string} p
- * @returns {string}
- */
-function real(p) {
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    return path.resolve(p);
-  }
-}
-
-if (process.argv[1] !== undefined && real(process.argv[1]) === real(fileURLToPath(import.meta.url))) main();
+runIfMain(import.meta.url, run);

@@ -43,12 +43,54 @@ const STRING_ARRAY_KEYS = /** @type {const} */ ([
 ]);
 
 /**
+ * Reads one top-level section of the config file.
+ * @param {string} root
+ * @param {string | null} explicitPath
+ * @param {string} sectionName
+ * @returns {{ section: Record<string, unknown> | undefined, path: string | null }}
+ */
+function readSection(root, explicitPath, sectionName) {
+  const file = explicitPath !== null ? path.resolve(explicitPath) : path.join(root, CONFIG_RELATIVE_PATH);
+  if (!fs.existsSync(file)) {
+    if (explicitPath !== null) throw new ScannerError('CONFIG_NOT_FOUND', `Config file not found: ${file}`, 2);
+    return { section: undefined, path: null };
+  }
+
+  /** @type {unknown} */
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) {
+    throw new ScannerError('CONFIG_INVALID', `Invalid JSON in ${file}: ${/** @type {Error} */ (e).message}`, 2);
+  }
+  const section =
+    typeof parsed === 'object' && parsed !== null ? /** @type {Record<string, unknown>} */ (parsed)[sectionName] : undefined;
+  const relative = path.relative(root, file) || file;
+  if (section === undefined) return { section: undefined, path: relative };
+  if (typeof section !== 'object' || section === null || Array.isArray(section)) {
+    throw new ScannerError('CONFIG_INVALID', `"${sectionName}" in ${relative} must be an object.`, 2);
+  }
+  return { section: /** @type {Record<string, unknown>} */ (section), path: relative };
+}
+
+/**
+ * @param {unknown} value
+ * @param {string} key Fully qualified key, for the error message.
+ * @returns {string[]}
+ */
+function stringArray(value, key) {
+  if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) {
+    throw new ScannerError('CONFIG_INVALID', `"${key}" must be an array of strings.`, 2);
+  }
+  return [...value];
+}
+
+/**
  * @param {string} root
  * @param {string | null} explicitPath
  * @returns {{ config: MagicStringsConfig, path: string | null, warnings: string[] }}
  */
 export function loadConfig(root, explicitPath) {
-  const file = explicitPath !== null ? path.resolve(explicitPath) : path.join(root, CONFIG_RELATIVE_PATH);
   /** @type {string[]} */
   const warnings = [];
   /** @type {MagicStringsConfig} */
@@ -61,32 +103,12 @@ export function loadConfig(root, explicitPath) {
     i18nFunctions: [],
     logFunctions: [],
   };
-  if (!fs.existsSync(file)) {
-    if (explicitPath !== null) throw new ScannerError('CONFIG_NOT_FOUND', `Config file not found: ${file}`, 2);
-    return { config, path: null, warnings };
-  }
-
-  /** @type {unknown} */
-  let parsed;
-  try {
-    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch (e) {
-    throw new ScannerError('CONFIG_INVALID', `Invalid JSON in ${file}: ${/** @type {Error} */ (e).message}`, 2);
-  }
-  const section =
-    typeof parsed === 'object' && parsed !== null ? /** @type {Record<string, unknown>} */ (parsed).magicStrings : undefined;
-  const relative = path.relative(root, file) || file;
+  const { section, path: relative } = readSection(root, explicitPath, 'magicStrings');
   if (section === undefined) return { config, path: relative, warnings };
-  if (typeof section !== 'object' || section === null || Array.isArray(section)) {
-    throw new ScannerError('CONFIG_INVALID', `"magicStrings" in ${relative} must be an object.`, 2);
-  }
 
   for (const [key, value] of Object.entries(section).sort(([a], [b]) => (a < b ? -1 : 1))) {
     if (/** @type {readonly string[]} */ (STRING_ARRAY_KEYS).includes(key)) {
-      if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) {
-        throw new ScannerError('CONFIG_INVALID', `"magicStrings.${key}" must be an array of strings.`, 2);
-      }
-      config[/** @type {typeof STRING_ARRAY_KEYS[number]} */ (key)] = [...value];
+      config[/** @type {typeof STRING_ARRAY_KEYS[number]} */ (key)] = stringArray(value, `magicStrings.${key}`);
     } else if (key === 'minLength' || key === 'duplicateThreshold') {
       if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
         throw new ScannerError('CONFIG_INVALID', `"magicStrings.${key}" must be an integer >= 1.`, 2);
@@ -100,6 +122,77 @@ export function loadConfig(root, explicitPath) {
     } else {
       warnings.push(`Unknown key "magicStrings.${key}" ignored.`);
     }
+  }
+  return { config, path: relative, warnings };
+}
+
+/**
+ * Per-repository configuration, read from `.claude/pr-review.json` → `tsConventions`.
+ * @typedef {object} TsConventionsConfig
+ * @property {string[]} ignorePaths Extra globs (repo-relative, `**` supported) to skip.
+ * @property {string[]} defaultExportPaths Globs of files where the framework requires a default export.
+ * @property {string[]} pascalCaseFactories Extra callees whose result may be bound to a PascalCase name (components, contexts, routes).
+ * @property {string[]} disabledRules Rule ids switched off for this repository.
+ */
+
+const TS_STRING_ARRAY_KEYS = /** @type {const} */ (['ignorePaths', 'defaultExportPaths', 'pascalCaseFactories', 'disabledRules']);
+
+/**
+ * @param {string} root
+ * @param {string | null} explicitPath
+ * @param {readonly string[]} knownRules Rule ids that `disabledRules` may name.
+ * @returns {{ config: TsConventionsConfig, path: string | null, warnings: string[] }}
+ */
+export function loadTsConventionsConfig(root, explicitPath, knownRules) {
+  /** @type {string[]} */
+  const warnings = [];
+  /** @type {TsConventionsConfig} */
+  const config = { ignorePaths: [], defaultExportPaths: [], pascalCaseFactories: [], disabledRules: [] };
+  const { section, path: relative } = readSection(root, explicitPath, 'tsConventions');
+  if (section === undefined) return { config, path: relative, warnings };
+
+  for (const [key, value] of Object.entries(section).sort(([a], [b]) => (a < b ? -1 : 1))) {
+    if (/** @type {readonly string[]} */ (TS_STRING_ARRAY_KEYS).includes(key)) {
+      config[/** @type {typeof TS_STRING_ARRAY_KEYS[number]} */ (key)] = stringArray(value, `tsConventions.${key}`);
+    } else {
+      warnings.push(`Unknown key "tsConventions.${key}" ignored.`);
+    }
+  }
+  const unknown = config.disabledRules.filter((r) => !knownRules.includes(r));
+  if (unknown.length > 0) {
+    throw new ScannerError(
+      'CONFIG_INVALID',
+      `"tsConventions.disabledRules" names unknown rules: ${unknown.join(', ')}.`,
+      2,
+      `Known rules: ${knownRules.join(', ')}.`,
+    );
+  }
+  config.disabledRules = [...new Set(config.disabledRules)].sort();
+  return { config, path: relative, warnings };
+}
+
+/**
+ * Per-repository configuration, read from `.claude/pr-review.json` → `zod`.
+ * @typedef {object} ZodConfig
+ * @property {string[]} ignorePaths Extra globs (repo-relative, `**` supported) to skip.
+ */
+
+/**
+ * @param {string} root
+ * @param {string | null} explicitPath
+ * @returns {{ config: ZodConfig, path: string | null, warnings: string[] }}
+ */
+export function loadZodConfig(root, explicitPath) {
+  /** @type {string[]} */
+  const warnings = [];
+  /** @type {ZodConfig} */
+  const config = { ignorePaths: [] };
+  const { section, path: relative } = readSection(root, explicitPath, 'zod');
+  if (section === undefined) return { config, path: relative, warnings };
+
+  for (const [key, value] of Object.entries(section).sort(([a], [b]) => (a < b ? -1 : 1))) {
+    if (key === 'ignorePaths') config.ignorePaths = stringArray(value, 'zod.ignorePaths');
+    else warnings.push(`Unknown key "zod.${key}" ignored.`);
   }
   return { config, path: relative, warnings };
 }
@@ -180,7 +273,7 @@ export const SCANNED_EXTENSIONS = /** @type {const} */ (['.ts', '.tsx', '.mts', 
 
 /**
  * @param {string} relPath
- * @param {MagicStringsConfig} config
+ * @param {{ ignorePaths: readonly string[] }} config
  * @returns {string | null} Why the file is skipped, or null if it must be scanned.
  */
 export function skipReason(relPath, config) {
@@ -197,4 +290,14 @@ export function skipReason(relPath, config) {
  */
 export function isScannedExtension(relPath) {
   return SCANNED_EXTENSIONS.some((ext) => relPath.endsWith(ext));
+}
+
+export const TYPESCRIPT_EXTENSIONS = /** @type {const} */ (['.ts', '.tsx', '.mts', '.cts']);
+
+/**
+ * @param {string} relPath
+ * @returns {boolean}
+ */
+export function isTypeScriptFile(relPath) {
+  return TYPESCRIPT_EXTENSIONS.some((ext) => relPath.endsWith(ext));
 }

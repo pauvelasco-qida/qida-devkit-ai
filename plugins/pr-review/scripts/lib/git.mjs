@@ -287,3 +287,27 @@ export function grepFiles(root, needles, pathspecs) {
     .filter((p) => p !== '')
     .sort();
 }
+
+/**
+ * Whether a file or directory exists in a commit.
+ * @param {string} root
+ * @param {string} commit
+ * @param {string} path Repo-relative path.
+ * @returns {boolean}
+ */
+export function pathExistsAtCommit(root, commit, path) {
+  return tryGit(['cat-file', '-e', `${commit}:${path}`], root) !== null;
+}
+
+/**
+ * Files deleted between the merge-base and the working tree. Code moved out of them is not new.
+ * @param {string} root
+ * @param {string} base Merge-base sha.
+ * @returns {string[]} Sorted repo-relative paths at the base.
+ */
+export function deletedFiles(root, base) {
+  return git(['diff', '--name-only', '-z', '-M', '--no-ext-diff', '--diff-filter=D', base], root)
+    .split('\0')
+    .filter((p) => p !== '')
+    .sort();
+}

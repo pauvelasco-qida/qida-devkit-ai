@@ -21,6 +21,8 @@ Start Step 1 as soon as the skill is invoked. Do not summarise this skill, annou
 | Key | Agent (`subagent_type`) | What it checks |
 |---|---|---|
 | `magic-strings` | `pr-review:magic-string-reviewer` | No magic strings introduced in TS/JS (ADR-FE-002, ADR-FE-004) |
+| `ts-conventions` | `pr-review:ts-conventions-reviewer` | New TypeScript follows the conventions (ADR-FE-001); only blocking rules fail |
+| `zod` | `pr-review:zod-reviewer` | New Zod validation uses `safeParse` / `safeParseAsync`, never `parse` / `parseAsync` |
 
 ## Steps
 

@@ -32,7 +32,7 @@
     },
     {
       "name": "pr-review",
-      "description": "Pull-request reviewer agents for Qida apps. First reviewer: deterministic magic-string detection for TypeScript/JavaScript (inline domain values, inline query keys per ADR-FE-002, literal UI text per ADR-FE-004, hardcoded secrets)",
+      "description": "Pull-request reviewer agents for Qida apps: deterministic magic-string detection for TypeScript/JavaScript (inline domain values, inline query keys per ADR-FE-002, literal UI text per ADR-FE-004, hardcoded secrets) TypeScript conventions for new code (no any or classes per ADR-FE-001, no enums, named exports, import type, plus advisory style rules) and Zod validation (safeParse, never parse)",
       "source": "./plugins/pr-review",
       "category": "development"
     }
