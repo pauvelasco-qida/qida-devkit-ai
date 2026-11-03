@@ -29,6 +29,12 @@
       "description": "Docker containerization expertise: Dockerfile optimization, security hardening, multi-stage builds, Compose orchestration, and production deployment patterns",
       "source": "./plugins/docker",
       "category": "devops"
+    },
+    {
+      "name": "pr-review",
+      "description": "Pull-request reviewer agents for Qida apps. First reviewer: deterministic magic-string detection for TypeScript/JavaScript (inline domain values, inline query keys per ADR-FE-002, literal UI text per ADR-FE-004, hardcoded secrets)",
+      "source": "./plugins/pr-review",
+      "category": "development"
     }
   ]
 }
