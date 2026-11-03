@@ -85,6 +85,7 @@ Excluded by the scanner: <sum of summary.excluded> literals (<rule>: <n>, … in
 
 - `<VERDICT>` is `PASS` when Findings is empty, otherwise `FAIL (<number of findings>)`.
 - Omit a table that has no rows and write `None.` under its heading instead.
+- If the JSON has a `warnings` array, add one line per warning after Scope: `Note: <warning>`.
 - If `typescript.typeInfo` is `none` or `partial`, add one line after Scope: `Note: some files had no tsconfig coverage, so typed literals in them could not be proven safe.`
 - End with this machine-readable line, on its own:
 
@@ -95,5 +96,5 @@ Excluded by the scanner: <sum of summary.excluded> literals (<rule>: <n>, … in
 ## Edge cases
 
 - **No TS/JS changes** (`files.scanned` empty): `PASS`, Scope line, then `No TypeScript/JavaScript files changed.`
-- **A candidate looks wrong to you** (e.g. a `VIOLATION` you believe is acceptable): still report it. Add, after the tables, a line *"To accept a literal deliberately: add `// magic-string-ok: <reason>` on its line, or list it in `.claude/pr-review.json` → `magicStrings.allowValues`."* once, not per finding.
+- **A candidate looks wrong to you** (e.g. a `VIOLATION` you believe is acceptable): still report it. Add, after the tables, a line *"To accept a literal deliberately: add `// magic-string-ok: <reason>` on its line (or on a comment-only line just above it), or list it in `.claude/pr-review.json` → `magicStrings.allowValues`. A `V-SECRET` in a known credential format cannot be accepted with the marker, only through `allowValues`; a real credential must be removed from the code."* once, not per finding.
 - **Many findings**: report all of them. Do not summarise, group or truncate the table.

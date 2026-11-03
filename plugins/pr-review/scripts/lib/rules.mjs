@@ -311,16 +311,44 @@ export const STANDARD_VALUES = new Set([
   'Meta',
 ]);
 
+/** A PEM private-key header on its own (a key split across literals starts with one). */
+export const PRIVATE_KEY_HEADER = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+
+/**
+ * A PEM private key: its header followed by a body. A header alone (`'-----BEGIN PRIVATE KEY-----'`
+ * in key-parsing code) is not a key. Legacy encrypted keys carry `Proc-Type:` / `DEK-Info:` lines
+ * before the body. Line breaks may be real or escaped (`\n` in source text). The pattern runs in
+ * linear time: each header line ends at its own line break, and every whitespace run is matched
+ * atomically (`(?=(…))\1`: taken whole, never given back), so neither a long line of `word:`
+ * pieces nor a long run of spaces after the header can make it backtrack.
+ */
+export const PRIVATE_KEY =
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----(?=((?:\s|\\[nr])*))\1(?:[A-Za-z-]+:[^\n\r\\]*(?:\r?\n|\\[nr])(?=((?:\s|\\[nr])*))\2)*[A-Za-z0-9+/=]{16,}/;
+
+/**
+ * Structured data whose long base64 runs are content, not credentials, so neither the entropy rule
+ * nor redaction looks inside them: a binary-media data URI (image, font, audio, video; a text or
+ * JSON payload can encode a credential and is judged like any text), and an SRI hash, whose
+ * digest has the exact length of its algorithm (sha256: 44, sha384: 64, sha512: 88 characters)
+ * and stands on its own (start, space, quote or `=` before it). Not global: it is used for its
+ * `.source` (and any direct `.test` stays stateless).
+ */
+export const STRUCTURED_DATA =
+  /data:(?:image|font|audio|video)\/[\w.+-]+(?:;[\w=.+-]+)*,[A-Za-z0-9+/=%]+|(?<![A-Za-z0-9+/_-])(?:sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)(?![A-Za-z0-9+/=])/;
+
 /** Well-known credential formats. A match is reported as V-SECRET and the value is redacted. */
 export const SECRET_PATTERNS = [
   /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  PRIVATE_KEY,
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+/,
   /\bgh[pousr]_[A-Za-z0-9]{30,}/,
   /\bgithub_pat_[A-Za-z0-9_]{30,}/,
   /\bxox[abprs]-[A-Za-z0-9-]{10,}/,
   /\bsk_(?:live|test)_[A-Za-z0-9]{16,}/,
-  /\bsk-[A-Za-z0-9_-]{20,}/,
+  // `sk-` keys (OpenAI, DeepSeek…) have one long random segment of 16+ alphanumerics: mixed case
+  // with a digit (base62 keys), or three digits (lowercase hex). Kebab-case names
+  // (`sk-spinner-double-bounce`, `sk-carousel-responsivecontainer2`) have neither.
+  /\bsk-(?=(?:[A-Za-z0-9]*[-_])*(?=[A-Za-z0-9]{16})(?:(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[a-z])[A-Za-z]*\d|(?:[A-Za-z]*\d){3}))[A-Za-z0-9_-]{20,}/,
   /\bAIza[0-9A-Za-z_-]{35}\b/,
   /hooks\.slack\.com\/services\/[A-Za-z0-9/]+/,
 ];

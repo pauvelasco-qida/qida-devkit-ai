@@ -59,7 +59,7 @@ function readSection(root, explicitPath, sectionName) {
   /** @type {unknown} */
   let parsed;
   try {
-    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    parsed = readJson(file);
   } catch (e) {
     throw new ScannerError('CONFIG_INVALID', `Invalid JSON in ${file}: ${/** @type {Error} */ (e).message}`, 2);
   }
@@ -195,6 +195,16 @@ export function loadZodConfig(root, explicitPath) {
     else warnings.push(`Unknown key "zod.${key}" ignored.`);
   }
   return { config, path: relative, warnings };
+}
+
+/**
+ * Parses a JSON file, tolerating a UTF-8 byte-order mark (editors on Windows add one). Shared by
+ * the config loader and the package resolution, so both read the same inputs the same way.
+ * @param {string} file
+ * @returns {any}
+ */
+export function readJson(file) {
+  return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
 }
 
 /**

@@ -12,32 +12,52 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseArgs } from 'node:util';
 import {
   classifySyntax,
   collectDefinitions,
   collectLiterals,
-  looksLikeSecret,
+  secretFormatMatches,
+  secretInfo,
+  secretKind,
   shapeOf,
   staticLength,
 } from './lib/classify.mjs';
-import { runIfMain, scriptKind, sortBy } from './lib/cli.mjs';
+import { runIfMain, sortBy } from './lib/cli.mjs';
 import { isScannedExtension, loadConfig, skipReason } from './lib/config.mjs';
 import { ScannerError } from './lib/errors.mjs';
-import { changedFiles, fileAtCommit, grepFiles, headInfo, mergeBase, repoRoot, resolveBaseRef } from './lib/git.mjs';
+import { grepFiles, repoRoot } from './lib/git.mjs';
 import { PLACEHOLDER } from './lib/rules.mjs';
+import {
+  deletedSources,
+  filePositions,
+  suppressionChecker,
+  tallyBy,
+  openScan,
+  openSources,
+  parseScanArgs,
+  unreadableWarning,
+  sourceLines,
+} from './lib/ts-scan.mjs';
+import { holdsSecretText, redactRecords, snippetMasker } from './lib/redact.mjs';
 import { TypeProber } from './lib/type-probe.mjs';
-import { loadTypeScript } from './lib/typescript-loader.mjs';
 
 /** @typedef {typeof import('typescript')} TS */
 /** @typedef {import('typescript').SourceFile} SourceFile */
 /** @typedef {import('./lib/classify.mjs').Literal} Literal */
 /** @typedef {import('./lib/config.mjs').MagicStringsConfig} MagicStringsConfig */
+/** @typedef {import('./lib/ts-scan.mjs').FilePositions} FilePositions */
+/**
+ * Helpers of one scanned file, shared by all its literals.
+ * @typedef {object} FileContext
+ * @property {FilePositions} positions Git positions (reported positions are git's, like the diff).
+ * @property {(line: number) => boolean} suppressed Marker check on the real source lines.
+ * @property {(line: number) => string} snippet Masked snippet of a TypeScript line.
+ */
 
-export const TOOL_VERSION = '0.1.0';
+export const TOOL_VERSION = '0.2.0';
 const MAX_DEFINITION_FILES = 400;
-const MAX_CODE = 160;
 const DEFAULT_MAX_PROBES = 1000;
+const SUPPRESSION_MARKER = 'magic-string-ok';
 const SOURCE_PATHSPECS = ['*.ts', '*.tsx', '*.mts', '*.cts', '*.js', '*.jsx', '*.mjs', '*.cjs'];
 
 const HELP = `Usage: find-magic-strings.mjs [options]
@@ -81,7 +101,9 @@ Options:
  * @property {string} file
  * @property {Literal} lit
  * @property {SourceFile} sf
- * @property {string[]} lines
+ * @property {FileContext} ctx The file's shared helpers (one object per file, not per literal).
+ * @property {'format' | 'heuristic' | null} secret How the value looks like a secret, computed once.
+ * @property {string[]} secretMatches Its known-format matches, computed with it.
  * @property {'EXCLUDED' | 'VIOLATION' | 'PENDING'} verdict
  * @property {string} rule
  * @property {string | null} adr
@@ -93,68 +115,47 @@ Options:
  */
 
 /**
- * @param {Literal} lit
- * @param {Set<number> | 'all'} added
+ * Whether a value's known-format credentials are all obvious placeholders. Only the matched
+ * tokens are judged, never the text around them (`'Your token: ghp_…'` stays a secret): each token
+ * must be made of plain words including a placeholder word (`sk-0000000000000000-your-key`, `ghp_xxxx…`;
+ * see `isPlaceholderToken`), or be AWS's documented `…EXAMPLE` key or an all-X AWS key (`AKIAXXXX…`). Placeholders are excluded,
+ * never printed.
+ * @param {string} value
+ * @param {readonly string[]} [matches] The value's known-format matches, when already computed.
  * @returns {boolean}
  */
-function onAddedLine(lit, added) {
-  if (added === 'all') return true;
-  for (let n = lit.line; n <= lit.endLine; n += 1) if (added.has(n)) return true;
-  return false;
+function isPlaceholder(value, matches = secretFormatMatches(value)) {
+  return matches.length > 0 && matches.every((m) => isPlaceholderToken(m) || /^(?:AKIA|ASIA)(?:[0-9A-Z]{9}EXAMPLE|X{16})$/.test(m));
+}
+
+/** Placeholder words, or a run of `x`. */
+const PLACEHOLDER_WORD = /^(?:your|example|placeholder|dummy|fake|sample|changeme|replace|replaceme|x{4,})$/;
+
+/**
+ * A matched token is a placeholder only when it is made of plain words: every delimited segment
+ * is a single-case word (`your`, `YOUR`, `XXXX`), a short number or a zero-filled id (`T00000000`,
+ * as in Slack's documented webhook), and one is a placeholder word. A real key
+ * with a placeholder-like suffix (`sk-proj-<random>-example`) keeps its random segment, so it
+ * stays a secret.
+ * @param {string} token
+ * @returns {boolean}
+ */
+function isPlaceholderToken(token) {
+  const segments = token.split(/[-_./:]+/).filter((s) => s !== '');
+  return (
+    segments.some((s) => PLACEHOLDER_WORD.test(s.toLowerCase())) &&
+    segments.every((s) => /^(?:[a-z]{1,16}|[A-Z]{1,16}|[xX]{4,}|\d{1,4}|[A-Z]?0{4,})$/.test(s))
+  );
 }
 
 /**
- * @param {string[]} lines
- * @param {number} line
- * @returns {boolean}
+ * A value with its known-format matches removed, to judge what is left on its own.
+ * @param {string} value
+ * @param {readonly string[]} [matches]
+ * @returns {string}
  */
-function isSuppressed(lines, line) {
-  const marker = 'magic-string-ok';
-  return (lines[line - 1] ?? '').includes(marker) || (lines[line - 2] ?? '').includes(marker);
-}
-
-/**
- * @param {string[]} argv
- * @returns {{ base: string | null, repo: string, config: string | null, typescript: string | null, types: boolean, maxProbes: number, verbose: boolean, help: boolean }}
- */
-function parseCli(argv) {
-  /** @type {ReturnType<typeof parseArgs>} */
-  let parsed;
-  try {
-    parsed = parseArgs({
-      args: argv,
-      options: {
-        base: { type: 'string' },
-        repo: { type: 'string' },
-        config: { type: 'string' },
-        typescript: { type: 'string' },
-        'no-types': { type: 'boolean', default: false },
-        'max-probes': { type: 'string' },
-        verbose: { type: 'boolean', default: false },
-        help: { type: 'boolean', short: 'h', default: false },
-      },
-      allowPositionals: false,
-      strict: true,
-    });
-  } catch (e) {
-    throw new ScannerError('USAGE', /** @type {Error} */ (e).message, 2, 'Run with --help.');
-  }
-  const v = parsed.values;
-  const maxProbes = v['max-probes'] === undefined ? DEFAULT_MAX_PROBES : Number(v['max-probes']);
-  if (!Number.isInteger(maxProbes) || maxProbes < 0) {
-    throw new ScannerError('USAGE', '--max-probes must be an integer >= 0.', 2);
-  }
-  const envTs = process.env.PR_REVIEW_TYPESCRIPT;
-  return {
-    base: typeof v.base === 'string' ? v.base : null,
-    repo: typeof v.repo === 'string' ? v.repo : process.cwd(),
-    config: typeof v.config === 'string' ? v.config : null,
-    typescript: typeof v.typescript === 'string' ? v.typescript : envTs !== undefined && envTs !== '' ? envTs : null,
-    types: v['no-types'] !== true,
-    maxProbes,
-    verbose: v.verbose === true,
-    help: v.help === true,
-  };
+function withoutFormatMatches(value, matches = secretFormatMatches(value)) {
+  return matches.reduce((acc, m) => acc.split(m).join(' '), value);
 }
 
 /**
@@ -162,29 +163,12 @@ function parseCli(argv) {
  * @returns {object} The JSON report.
  */
 export function run(argv) {
-  const opts = parseCli(argv);
+  const opts = parseScanArgs(argv, { maxProbes: DEFAULT_MAX_PROBES });
   if (opts.help) return { help: HELP };
 
   const root = repoRoot(path.resolve(opts.repo));
   const { config, path: configPath, warnings } = loadConfig(root, opts.config);
-  const baseRef = resolveBaseRef(root, opts.base);
-  const base = mergeBase(root, baseRef);
-  const head = headInfo(root);
-  const changed = changedFiles(root, base);
-
-  /** @type {{ path: string, reason: string }[]} */
-  const skipped = [];
-  const scanned = [];
-  let otherFiles = 0;
-  for (const f of changed) {
-    if (!isScannedExtension(f.path)) {
-      otherFiles += 1;
-      continue;
-    }
-    const reason = skipReason(f.path, config);
-    if (reason !== null) skipped.push({ path: f.path, reason });
-    else if (fs.existsSync(path.join(root, f.path))) scanned.push(f);
-  }
+  const { base, scanned, header, files } = openScan(root, opts, config, isScannedExtension);
 
   /** @type {Record<string, number>} */
   const excludedCounts = {};
@@ -193,30 +177,31 @@ export function run(argv) {
   const report = {
     tool: 'find-magic-strings',
     version: TOOL_VERSION,
-    base: { ref: baseRef, mergeBase: base },
-    head,
+    ...header,
     typescript: /** @type {{ version: string, typeInfo: 'full' | 'partial' | 'none' | 'disabled', probes: number } | null} */ (null),
     config: { path: configPath, warnings },
-    files: {
-      scanned: scanned.length,
-      skipped: skipped.length,
-      skippedByReason: Object.fromEntries(
-        sortBy([...new Set(skipped.map((s) => s.reason))], (r) => r).map((r) => [r, skipped.filter((s) => s.reason === r).length]),
-      ),
-      otherFiles,
-      scannedPaths: opts.verbose ? scanned.map((f) => f.path) : undefined,
-      skippedPaths: opts.verbose ? skipped : undefined,
-    },
+    files,
     summary: { violations: 0, review: 0, excluded: excludedCounts },
     candidates: /** @type {Candidate[]} */ ([]),
     excluded: /** @type {typeof excludedList | undefined} */ (undefined),
+    warnings: /** @type {string[] | undefined} */ (undefined),
   };
-  if (scanned.length === 0) return report;
+  // An allow-list entry in a credential format accepts that credential wherever it is inlined:
+  // say so in every report, even one with nothing scanned (by position, never by value).
+  const allowWarnings = config.allowValues.flatMap((v, i) =>
+    secretKind(v) === 'format' ? [`magicStrings.allowValues[${i}] is in a credential format: it accepts a hardcoded credential (ADR-IN-007).`] : [],
+  );
+  if (scanned.length === 0) {
+    if (allowWarnings.length > 0) report.warnings = allowWarnings;
+    return report;
+  }
 
-  const { ts } = loadTypeScript(root, opts.typescript, scanned.map((f) => path.dirname(f.path)));
-
+  const { ts, parse, previous, unreadable } = openSources(root, opts, base, scanned);
+  /** Value balance: > 0 means more occurrences after the PR than before (introduced, not moved). */
   /** @type {Map<string, number>} */
   const delta = new Map();
+  /** @param {readonly Literal[]} lits @param {1 | -1} sign */
+  const tally = (lits, sign) => tallyBy(delta, lits, sign, (l) => l.value);
   /** @type {Working[]} */
   const work = [];
   /** @type {Map<string, SourceFile>} */
@@ -225,25 +210,46 @@ export function run(argv) {
   for (const f of scanned) {
     const abs = path.join(root, f.path);
     const text = fs.readFileSync(abs, 'utf8');
-    const sf = ts.createSourceFile(abs, text, ts.ScriptTarget.Latest, true, scriptKind(f.path, ts));
+    const sf = parse(abs, text);
     headFiles.set(f.path, sf);
     const lits = collectLiterals(ts, sf);
-    for (const l of lits) delta.set(l.value, (delta.get(l.value) ?? 0) + 1);
-    if (f.oldPath !== null) {
-      const oldText = fileAtCommit(root, base, f.oldPath);
-      if (oldText !== null) {
-        const oldSf = ts.createSourceFile(f.oldPath, oldText, ts.ScriptTarget.Latest, true, scriptKind(f.oldPath, ts));
-        for (const l of collectLiterals(ts, oldSf)) delta.set(l.value, (delta.get(l.value) ?? 0) - 1);
+    tally(lits, 1);
+    const old = previous.get(f.path);
+    previous.delete(f.path); // used once: released as soon as it is tallied
+    if (old !== undefined) tally(collectLiterals(ts, parse(old.path, old.text)), -1);
+    const positions = filePositions(sf);
+    const added = lits.filter((lit) => positions.added(lit.line, lit.endLine, f.addedLines));
+    if (added.length === 0) continue;
+    const lines = sourceLines(sf);
+    // Indexes the file's secret literals from `lits`, only when a snippet is printed.
+    /**
+     * Per literal, computed at most once and shared by the work items and the masker: its secret
+     * kind (a piece of a private key split across literals counts as one), its format matches,
+     * and whether a snippet must hide it.
+     */
+    /** @type {Map<Literal, { kind: 'format' | 'heuristic' | null, matches: string[], holds: boolean }>} */
+    const infos = new Map();
+    /** @param {Literal} l */
+    const infoOf = (l) => {
+      let hit = infos.get(l);
+      if (hit === undefined) {
+        const { kind, matches } = secretInfo(l.value);
+        const holds = holdsSecretText(ts, l.node, l.value, kind);
+        hit = { kind: kind ?? (holds ? 'heuristic' : null), matches, holds };
+        infos.set(l, hit);
       }
-    }
-    const lines = text.split(/\r?\n/);
-    for (const lit of lits) {
-      if (!onAddedLine(lit, f.addedLines)) continue;
+      return hit;
+    };
+    /** @type {FileContext} */
+    const ctx = { positions, suppressed: suppressionChecker(ts, sf, lines, SUPPRESSION_MARKER), snippet: snippetMasker(ts, sf, lines, () => lits.filter((l) => infoOf(l).holds)) };
+    for (const lit of added) {
       work.push({
         file: f.path,
         lit,
         sf,
-        lines,
+        ctx,
+        secret: infoOf(lit).kind,
+        secretMatches: infoOf(lit).matches,
         verdict: 'PENDING',
         rule: 'REVIEW',
         adr: null,
@@ -256,7 +262,16 @@ export function run(argv) {
     }
   }
 
-  // Step 1 — per-literal rules, fixed order, first match wins.
+  // Literals moved out of deleted files are not introduced either (read only when something can move).
+  const deleted = work.length > 0 ? deletedSources(root, base, config, isScannedExtension) : { sources: [], unreadable: [] };
+  for (const d of deleted.sources) tally(collectLiterals(ts, parse(d.path, d.text)), -1);
+  const baseWarnings = unreadableWarning([...unreadable, ...deleted.unreadable]);
+  baseWarnings.unshift(...allowWarnings);
+
+  // Step 1 — per-literal rules, fixed order, first match wins. A known credential format comes
+  // before the inline marker, so a one-line comment cannot hide it (ADR-IN-007); only an explicit
+  // `allowValues` entry (reviewed config) or an obvious placeholder value clears it. The entropy
+  // heuristic can misfire on public ids and hashes, so it comes after the marker and can be accepted.
   for (const w of work) {
     const v = w.lit.value;
     /** @param {string} rule @param {string} [detail] */
@@ -265,16 +280,23 @@ export function run(argv) {
       w.rule = rule;
       w.detail = detail;
     };
-    if (staticLength(v) < config.minLength) exclude('E-TRIVIAL');
-    else if (isSuppressed(w.lines, w.lit.line)) exclude('E-SUPPRESSED');
-    else if (config.allowValues.includes(v)) exclude('E-ALLOWLISTED');
-    else if (looksLikeSecret(v)) {
+    const secret = () => {
       w.verdict = 'VIOLATION';
       w.rule = 'V-SECRET';
       w.adr = 'ADR-IN-007';
       w.context = 'secret';
       w.redacted = true;
-    } else {
+    };
+    if (config.allowValues.includes(v)) exclude('E-ALLOWLISTED');
+    else if (w.secret === 'format') {
+      // A placeholder credential next to a real opaque token is still a secret.
+      const matches = w.secretMatches;
+      if (isPlaceholder(v, matches) && secretKind(withoutFormatMatches(v, matches)) === null) exclude('E-PLACEHOLDER');
+      else secret();
+    } else if (staticLength(v) < config.minLength) exclude('E-TRIVIAL');
+    else if (w.ctx.suppressed(w.lit.line)) exclude('E-SUPPRESSED');
+    else if (w.secret === 'heuristic') secret();
+    else {
       const s = classifySyntax(ts, w.lit, w.sf, config);
       if (s.verdict === 'EXCLUDED') exclude(s.rule, s.detail);
       else if ((delta.get(v) ?? 0) <= 0) exclude('E-MOVED');
@@ -321,18 +343,25 @@ export function run(argv) {
   };
 
   // Step 3 — an existing named definition with the same value.
-  const lookup = [
-    ...new Set(
-      work
-        .filter((w) => w.verdict !== 'EXCLUDED' && w.rule !== 'V-SECRET' && !w.lit.value.includes(PLACEHOLDER))
-        .map((w) => w.lit.value)
-        .filter((v) => !/['"`\\\n\r]/.test(v)),
-    ),
-  ].sort();
-  if (lookup.length > 0) {
-    const needles = lookup.flatMap((v) => [`'${v}'`, `"${v}"`, `\`${v}\``]);
+  const lookup = new Set(
+    work
+      .filter((w) => w.verdict !== 'EXCLUDED' && w.rule !== 'V-SECRET' && !w.lit.value.includes(PLACEHOLDER))
+      .map((w) => w.lit.value)
+      .filter((v) => !/['"`\\\n\r]/.test(v)),
+  );
+  if (lookup.size > 0) {
+    const needles = sortBy([...lookup], (v) => v).flatMap((v) => [`'${v}'`, `"${v}"`, `\`${v}\``]);
+    /** @type {string[]} */
+    let matches = [];
+    try {
+      matches = grepFiles(root, needles, SOURCE_PATHSPECS);
+    } catch (e) {
+      if (!(e instanceof ScannerError)) throw e;
+      // Keep the report, but say that existing constants in other files were not searched.
+      baseWarnings.push(`Existing-constant search skipped (${e.code}): ${e.message}`);
+    }
     const files = new Set(
-      grepFiles(root, needles, SOURCE_PATHSPECS)
+      matches
         .filter((p) => isScannedExtension(p) && skipReason(p, config) === null)
         .slice(0, MAX_DEFINITION_FILES),
     );
@@ -344,12 +373,16 @@ export function run(argv) {
       if (sf === undefined) {
         const abs = path.join(root, p);
         if (!fs.existsSync(abs)) continue;
-        sf = ts.createSourceFile(abs, fs.readFileSync(abs, 'utf8'), ts.ScriptTarget.Latest, true, scriptKind(p, ts));
+        sf = parse(p, fs.readFileSync(abs, 'utf8'));
       }
+      /** @type {FilePositions | null} */
+      let at = null;
       for (const [value, list] of collectDefinitions(ts, sf)) {
-        if (!lookup.includes(value)) continue;
+        if (!lookup.has(value)) continue;
         const all = defs.get(value) ?? [];
-        for (const d of list) all.push({ name: d.name, file: p, line: d.line });
+        at ??= filePositions(sf);
+        // Git line numbers, like every other line of the report.
+        for (const d of list) all.push({ name: d.name, file: p, line: at.report(d.line, 1).line });
         defs.set(value, all);
       }
     }
@@ -391,20 +424,20 @@ export function run(argv) {
     if (w.verdict === 'EXCLUDED') {
       excludedCounts[w.rule] = (excludedCounts[w.rule] ?? 0) + 1;
       if (opts.verbose) {
-        excludedList.push({ file: w.file, line: w.lit.line, value: w.lit.value, rule: w.rule, detail: w.detail });
+        const value = w.secret !== null ? `[REDACTED: ${w.lit.value.length} chars]` : w.lit.value;
+        excludedList.push({ file: w.file, line: w.ctx.positions.report(w.lit.line, w.lit.column).line, value, rule: w.rule, detail: w.detail });
       }
       continue;
     }
     n += 1;
-    const rawLine = (w.lines[w.lit.line - 1] ?? '').trim();
     const value = w.redacted ? `[REDACTED: ${w.lit.value.length} chars]` : w.lit.value;
-    let code = w.redacted ? rawLine.split(w.lit.value).join('[REDACTED]') : rawLine;
-    if (code.length > MAX_CODE) code = `${code.slice(0, MAX_CODE - 1)}…`;
+    const code = w.ctx.snippet(w.lit.line);
+    const at = w.ctx.positions.report(w.lit.line, w.lit.column);
     report.candidates.push({
       id: `MS-${String(n).padStart(3, '0')}`,
       file: w.file,
-      line: w.lit.line,
-      column: w.lit.column,
+      line: at.line,
+      column: at.column,
       kind: w.lit.kind,
       value,
       shape: w.redacted ? 'secret' : shapeOf(w.lit.value),
@@ -426,6 +459,10 @@ export function run(argv) {
     excluded: sortedCounts,
   };
   if (opts.verbose) report.excluded = excludedList;
+  // The redaction boundary: every field quoting source (`value`, `code`, `detail`…).
+  report.candidates = redactRecords(report.candidates);
+  if (report.excluded !== undefined) report.excluded = redactRecords(report.excluded);
+  if (baseWarnings.length > 0) report.warnings = baseWarnings;
   return report;
 }
 

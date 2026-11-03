@@ -293,7 +293,12 @@ export class TypeProber {
     if (sf === undefined || sf.text !== ownSf.text) return results;
     const text = sf.text;
 
-    const baselineRaw = encodeDiagnostics(project.program.getSemanticDiagnostics(sf), (pos) => pos);
+    /** Baseline diagnostics as a multiset, built once per file. */
+    /** @type {Map<number, number>} */
+    const baseline = new Map();
+    for (const k of encodeDiagnostics(project.program.getSemanticDiagnostics(sf), (pos) => pos)) {
+      baseline.set(k, (baseline.get(k) ?? 0) + 1);
+    }
     const edits = lits.map((l) => this.editFor(l, ownSf));
     const own = lits.map((l) => /** @type {[number, number]} */ ([l.node.getStart(ownSf), l.node.end]));
     const regions = lits.map((l) => probeRegion(ts, l.node, ownSf));
@@ -305,9 +310,7 @@ export class TypeProber {
      * @returns {number[]}
      */
     const fresh = (encoded) => {
-      /** @type {Map<number, number>} */
-      const left = new Map();
-      for (const k of baselineRaw) left.set(k, (left.get(k) ?? 0) + 1);
+      const left = new Map(baseline);
       /** @type {number[]} */
       const out = [];
       for (const k of encoded) {

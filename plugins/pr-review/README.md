@@ -43,7 +43,7 @@ Detection is done by a script, not by the model. `scripts/find-magic-strings.mjs
 1. Lists changed files and their exact **added lines** (`git diff -U0` against the merge-base, plus untracked files).
 2. Parses each changed TS/JS file with the TypeScript compiler and collects every string and template literal on an added line. Bare JSX text is not a string literal; a future i18n reviewer will cover it.
 3. Classifies each literal with a **fixed, ordered rule list**; the first match wins (catalogue below).
-4. **Moved, not introduced:** if a value appears no more often across the changed files after the PR than before, the literal only moved (`E-MOVED`).
+4. **Moved, not introduced:** if a value appears no more often across the changed and deleted files after the PR than before, the literal only moved (`E-MOVED`).
 5. **Type-check probe:** for literals still open, it swaps the literal for a value no type allows and re-checks the file with the repo's own `tsconfig`. If the compiler now reports an error at that spot, a typo there would not compile. The literal is then constrained by the type system (literal unions, typed routes, typed i18n keys, discriminants…) and is not magic (`E-TYPED`).
 6. Applies the cross-file rules: an existing named constant with the same value, the same value repeated in the PR, URL/path shapes.
 7. Prints JSON, sorted by file/line/column, with stable ids `MS-001…`.
@@ -58,10 +58,12 @@ Rules are evaluated in this order per literal on an added line.
 
 | Rule | Outcome | Meaning |
 |---|---|---|
+| `E-ALLOWLISTED` | excluded | Value in `allowValues` (an exact, reviewed config entry: the only way to accept a known credential format, e.g. a mock JWT) |
+| `E-PLACEHOLDER` | excluded | Known credential format that is an obvious placeholder: the matched token is made of plain single-case words, short numbers or zero-filled ids, one of them `your`, `example`, `fake`, `xxxx`… (`sk-0000000000000000-your-key`, `ghp_xxxx…`), or AWS's `…EXAMPLE` or all-X key; the text around the token is never judged. Value redacted in `--verbose` output |
+| `V-SECRET` | **violation** | Known credential format (AWS, private key with its body — a bare `-----BEGIN … PRIVATE KEY-----` header is the heuristic row below — JWT, GitHub/Slack/Stripe/OpenAI/Google token). The marker cannot hide it. **Value redacted** in all output, including every code snippet of the file (ADR-TR-002 §4, ADR-IN-007) |
 | `E-TRIVIAL` | excluded | Empty, whitespace-only, or shorter than `minLength` (2) ignoring `${…}` |
-| `E-SUPPRESSED` | excluded | `magic-string-ok` comment on the same or previous line |
-| `E-ALLOWLISTED` | excluded | Value in `allowValues` |
-| `V-SECRET` | **violation** | Known credential format or high-entropy opaque token. **Value redacted** in all output (ADR-TR-002 §4, ADR-IN-007) |
+| `E-SUPPRESSED` | excluded | `magic-string-ok` on the literal's line, or on a comment-only line just above it (`//`, `/* */`, or JSX `{/* */}`) |
+| `V-SECRET` | **violation** | High-entropy opaque token (32+ mixed-case alphanumerics or a 40+ base64 line, not identifier-like) anywhere in the value (`Bearer <token>`, `?key=<token>`, JSON; data URIs and SRI hashes never), or a bare private-key header (a key split across literals). A heuristic, so the marker or `allowValues` can accept a false positive (public id, fixture hash); the value is still redacted |
 | `E-TYPE-POSITION` | excluded | In a type (`'a' \| 'b'`, `Literal<…>`) |
 | `E-MODULE` | excluded | Import/export specifier, `require()`, `import()`, `vi.mock()`… |
 | `E-DIRECTIVE` | excluded | `'use client'`, `'use strict'`… |
@@ -108,7 +110,7 @@ This step is optional. Commit `.claude/pr-review.json` in the reviewed repositor
 
 The list keys extend the built-in lists. Unknown keys produce a warning, and invalid values stop the scan (`CONFIG_INVALID`).
 
-To accept one literal deliberately, put the marker on its line or the line above:
+To accept one literal deliberately, put the marker on its line, or on a comment-only line just above it (a known credential format cannot be accepted this way, only through `allowValues`). Since plugin 0.3.0, a marker at the end of a code line covers only that line, no longer the next one:
 
 ```ts
 headers.set('X-Vendor-Token', token) // magic-string-ok: header name fixed by the vendor API
@@ -121,7 +123,7 @@ node scripts/find-magic-strings.mjs [--base <ref>] [--repo <dir>] [--config <fil
                                     [--typescript <dir>] [--no-types] [--max-probes <n>] [--verbose]
 ```
 
-Exit codes: `0` ok (findings or not), `2` usage/config error, `3` environment error (not a git repo, no TypeScript), `1` internal error. Errors are JSON on stdout: `{"error": {"code", "message", "hint"}}`.
+Exit codes: `0` ok (findings or not), `2` usage/config error, `3` environment error (not a git repo, no TypeScript), `1` internal error. Errors are JSON on stdout: `{"error": {"code", "message", "hint"}}`. If the search for existing constants in other files fails (`git grep` error), the report is still produced, with a top-level `warnings` array saying so.
 
 ## ts-conventions: how it works
 
@@ -204,7 +206,7 @@ Checks that the Zod validation a PR adds uses `safeParse` / `safeParseAsync`, ne
 
 | Rule | Severity | Flags | Not flagged |
 |---|---|---|---|
-| `V-ZOD-PARSE` | blocking | `.parse()` / `.parseAsync()` on a Zod schema; the candidate's `suggestion` is the `safeParse` / `safeParseAsync` call | `E-NOT-ZOD`: with types, the receiver has no `safeParse`. Without types (no `tsconfig` covers the file, `--no-types`, or `zod` not installed), the file does not import `zod` and the receiver is not named `…Schema`. `JSON.parse` is never a candidate |
+| `V-ZOD-PARSE` | blocking | `.parse()` / `.parseAsync()` on a Zod schema; the candidate's `suggestion` is the `safeParse` / `safeParseAsync` call | `E-NOT-ZOD`: with types, the receiver has no `safeParse`. With types, an optional schema (`ZodX \| undefined`) still counts. Without types (no `tsconfig` covers the file, `--no-types`, or `zod` not installed), the receiver is not named `…Schema` and either is rooted at a known global (`Date`, `URL`, `globalThis`…) or a name imported from a package that does not say schemas (`superjson`, `qs`, `date-fns`…; a package or name with `schema`, `contract`, `dto`, `validat`, `model` or `zod` does), or the file does not import `zod`. `JSON.parse`, `Date.parse` and other known globals are never items |
 
 Skipped files are the same as for magic strings: tests, stories, generated code and config files.
 
@@ -237,6 +239,18 @@ node scripts/find-zod-issues.mjs [--base <ref>] [--repo <dir>] [--config <file>]
 
 Exit codes and the error format are the same as for `find-magic-strings.mjs`.
 
+## Design decisions (accepted trade-offs)
+
+The scanners are heuristics. These choices were made deliberately (2026-11-03); each one trades a known false positive or false negative for a stronger guarantee. A change here is a policy change, not a bug fix.
+
+| Decision | Accepted cost | Why |
+|---|---|---|
+| A bare `-----BEGIN … PRIVATE KEY-----` header is a `V-SECRET` (the heuristic kind: the marker can accept it) | Key-parsing code that compares against the header needs one `// magic-string-ok` | Catches keys split across literals (`'-----BEGIN…\n' + '…'`) |
+| A high-entropy token anywhere in a value is a `V-SECRET` (heuristic kind: suppressible) — `Bearer <token>`, `?key=<token>`, JSON | A content-hashed asset URL needs a marker or an `allowValues` entry | What is masked in the output is exactly what is reported; no credential in a URL or JSON passes as a plain magic string |
+| Without types, `.parse` on a name imported from a declared npm package is Zod only when the package or the name says schemas (`schema`, `contract`, `dto`, `validat`, `model`, `zod`); workspace packages (`workspace:`/`file:`/`link:` ranges, or members listed in the root `workspaces` or `pnpm-workspace.yaml`) and bare specifiers that are neither declared nor installed in `node_modules` (aliases) count as project code; an undeclared but installed (hoisted) package is a package | A schema from a published internal package with a neutral name (`User` from `@qida/domain@^1.2`) is missed when type information is unavailable | No blocking false positives on `superjson.parse`, `cronParser.parse`… With type information (the normal case) the checker decides and none of this applies |
+| A marker on a code line covers only that line; only a comment-only line above covers the next line (since 0.3.0) | Markers written at the end of a code line above a literal stop covering it | Same rule in the three reviewers; one marker can never silently cover two lines |
+| Known credential formats ignore the inline marker; only an exact `allowValues` entry accepts one, and every report then carries a warning naming that entry by position | — | A one-line comment cannot hide a credential (ADR-IN-007) |
+
 ## Development
 
 ```bash
@@ -246,7 +260,7 @@ pnpm test           # node:test, builds throwaway git repos per case
 pnpm typecheck      # tsc --checkJs --strict over scripts and tests
 ```
 
-Changing a rule or a built-in list changes results. Bump `version` in `.claude-plugin/plugin.json` and `TOOL_VERSION` in the affected script, and add a test. Shared code lives in `scripts/lib/` (`git.mjs`, `config.mjs`, `cli.mjs`, `errors.mjs`, `typescript-loader.mjs`, `type-probe.mjs`, and `ts-scan.mjs`, the diff-to-candidates pipeline of the TypeScript-only scanners), and shared test fixtures in `tests/helpers.mjs`.
+Changing a rule or a built-in list changes results. Bump `version` in `.claude-plugin/plugin.json` and `TOOL_VERSION` in the affected script, and add a test. Shared code lives in `scripts/lib/` (`git.mjs`, `config.mjs`, `cli.mjs`, `errors.mjs`, `typescript-loader.mjs`, `type-probe.mjs`, `redact.mjs` (the redaction boundary of every report), `packages.mjs` (package and workspace resolution for the untyped Zod fallback), and `ts-scan.mjs`, the diff-to-candidates pipeline of the TypeScript-only scanners), and shared test fixtures in `tests/helpers.mjs`.
 
 ### Adding a reviewer
 

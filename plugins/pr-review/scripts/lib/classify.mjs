@@ -39,15 +39,44 @@ import * as R from './rules.mjs';
  */
 
 const UPPER_SNAKE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$/;
-const MAX_DETAIL = 60;
+/** Longest detail kept on a work item: far above the printed length (120), so it bounds memory only. */
+const MAX_STORED_DETAIL = 400;
 
 /**
+ * A detail quoting code, on one line, capped at MAX_STORED_DETAIL at a separator (`capText`), so
+ * the cap never leaves a partial token; its printed form is masked, then shortened, at the report
+ * boundary (`redactRecords`).
  * @param {string} s
  * @returns {string}
  */
 function short(s) {
-  const one = s.replace(/\s+/g, ' ').trim();
-  return one.length > MAX_DETAIL ? `${one.slice(0, MAX_DETAIL - 1)}…` : one;
+  return capText(s.replace(/\s+/g, ' ').trim(), MAX_STORED_DETAIL);
+}
+
+/**
+ * Caps a stored text at `max` characters, cutting only at a separator (space, quote, comma,
+ * bracket…): a token, URL or credential is kept whole or dropped whole, never cut to a prefix
+ * that masking would no longer recognise.
+ * @param {string} s
+ * @param {number} max
+ * @returns {string}
+ */
+export function capText(s, max) {
+  if (s.length <= max) return s;
+  // A separator (space, quote, comma, bracket…) within the last quarter of the allowed length.
+  // `.`, `/` and `:` are not separators: they occur inside tokens (a JWT, a base64 line, a URL).
+  for (let cut = max - 1; cut >= Math.floor(max * 0.75); cut -= 1) {
+    if (!/[\s'"`,;()[\]{}<>]/.test(s[cut])) continue;
+    const kept = s.slice(0, cut);
+    // A cut inside a private key would leave a header with too little body to be recognised (and
+    // masked) as a key: cut before the header instead.
+    const header = kept.search(R.PRIVATE_KEY_HEADER);
+    if (header !== -1 && R.PRIVATE_KEY.test(s) && !R.PRIVATE_KEY.test(kept)) return `${s.slice(0, header)}…`;
+    return `${kept}…`;
+  }
+  // None: mask every token first, so the hard cut cannot leave a partial one.
+  const masked = maskOpaqueTokens(secretFormatRanges(s).reduceRight((acc, [from, to]) => `${acc.slice(0, from)}[REDACTED]${acc.slice(to)}`, s));
+  return masked.length <= max ? masked : `${masked.slice(0, max - 1)}…`;
 }
 
 /**
@@ -317,8 +346,8 @@ export function definitionOf(ts, node) {
     ) {
       // container
     } else if (ts.isArrayLiteralExpression(p)) {
-      const i = p.elements.indexOf(/** @type {import('typescript').Expression} */ (child));
-      if (!p.elements.some((e) => ts.isSpreadElement(e))) segments.push(`[${i}]`);
+      const info = arrayInfo(ts, p);
+      if (!info.hasSpread) segments.push(`[${info.index.get(child) ?? -1}]`);
     } else if (ts.isPropertyAssignment(p) && p.initializer === child) {
       segments.push(`.${propertyName(ts, p.name)}`);
     } else if ((ts.isCallExpression(p) || ts.isNewExpression(p)) && (p.arguments ?? []).some((a) => a === child)) {
@@ -602,6 +631,23 @@ function describe(ts, a, jsx, call, sf) {
   return { context: 'other', detail: ts.SyntaxKind[n.kind] };
 }
 
+/** Per array literal: whether it has a spread, and each element's index (computed once). */
+/** @type {WeakMap<import('typescript').ArrayLiteralExpression, { hasSpread: boolean, index: Map<import('typescript').Node, number> }>} */
+const ARRAYS = new WeakMap();
+
+/**
+ * @param {TS} ts
+ * @param {import('typescript').ArrayLiteralExpression} arr
+ * @returns {{ hasSpread: boolean, index: Map<import('typescript').Node, number> }}
+ */
+function arrayInfo(ts, arr) {
+  const hit = ARRAYS.get(arr);
+  if (hit !== undefined) return hit;
+  const info = { hasSpread: arr.elements.some((e) => ts.isSpreadElement(e)), index: new Map(arr.elements.map((e, i) => [/** @type {import('typescript').Node} */ (e), i])) };
+  ARRAYS.set(arr, info);
+  return info;
+}
+
 /**
  * Named definitions (see `definitionOf`) in a file, by literal value.
  * @param {TS} ts
@@ -652,16 +698,130 @@ function entropy(value) {
 }
 
 /**
+ * SECRET_PATTERNS compiled once with the `g` flag, for `matchAll`. `matchAll` clones the regex but
+ * copies its `lastIndex` into the clone (ECMAScript RegExp.prototype[@@matchAll], step 7), so a
+ * shared global regex must be reset before each use: without it, a second call starts mid-text.
+ */
+const SECRET_PATTERNS_G = R.SECRET_PATTERNS.map((re) => new RegExp(re.source, `${re.flags.replace('g', '')}g`));
+
+/**
+ * Every substring of a text that matches a known credential format (AWS key, private key, JWT,
+ * GitHub/Slack/Stripe/OpenAI/Google token…).
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function secretFormatMatches(text) {
+  return secretFormatRanges(text).map(([from, to]) => text.slice(from, to));
+}
+
+/**
+ * Character ranges of a text's known-format credentials, `[from, to)`, sorted, with overlapping or
+ * nested matches merged (a token inside a webhook URL): masking them never leaves part of one.
+ * @param {string} text
+ * @returns {[number, number][]}
+ */
+export function secretFormatRanges(text) {
+  /** @type {[number, number][]} */
+  const all = [];
+  for (const re of SECRET_PATTERNS_G) {
+    re.lastIndex = 0;
+    for (const m of text.matchAll(re)) all.push([m.index, m.index + m[0].length]);
+  }
+  all.sort((x, y) => x[0] - y[0] || y[1] - x[1]);
+  /** @type {[number, number][]} */
+  const merged = [];
+  for (const r of all) {
+    const last = merged[merged.length - 1];
+    if (last !== undefined && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+    else merged.push([r[0], r[1]]);
+  }
+  return merged;
+}
+
+/**
+ * How a value looks like a secret: `format` (a known credential format, never acceptable inline),
+ * `heuristic` (an opaque high-entropy token anywhere in it, or a bare private-key header such as
+ * the first piece of a key split across literals; the marker may accept it), or null.
  * @param {string} value
+ * @returns {'format' | 'heuristic' | null}
+ */
+export function secretKind(value) {
+  return secretInfo(value).kind;
+}
+
+/**
+ * `secretKind` with the known-format matches it found, for callers that need both.
+ * @param {string} value
+ * @returns {{ kind: 'format' | 'heuristic' | null, matches: string[] }}
+ */
+export function secretInfo(value) {
+  const matches = secretFormatMatches(value);
+  if (matches.length > 0) return { kind: 'format', matches };
+  if (R.PRIVATE_KEY_HEADER.test(value)) return { kind: 'heuristic', matches };
+  return { kind: maskOpaqueTokens(value) === value ? null : 'heuristic', matches };
+}
+
+/** Splits a text around its structured data (data URIs, SRI hashes). */
+const STRUCTURED_SPLIT = new RegExp(`(${R.STRUCTURED_DATA.source})`);
+
+/**
+ * A plain path segment: a lowercase word, possibly with digits or `-`/`_` (`assets`, `v1`,
+ * `user-avatars`), or a capitalised word (`Images`). Random base64 is mixed case.
+ * @param {string} piece
  * @returns {boolean}
  */
-export function looksLikeSecret(value) {
-  if (R.SECRET_PATTERNS.some((re) => re.test(value))) return true;
-  // Unknown formats: only a single opaque mixed-case token (base64/base62-like) with high entropy.
-  // URLs, paths, file names, identifiers and templates never qualify.
-  if (!/^[A-Za-z0-9+=_-]{32,}$/.test(value)) return false;
-  if (!/[a-z]/.test(value) || !/[A-Z]/.test(value) || !/\d/.test(value)) return false;
-  return entropy(value) >= 4.2;
+function isPathWord(piece) {
+  return piece.length <= 32 && (/^[a-z0-9][a-z0-9_-]*$/.test(piece) || /^[A-Z][a-z0-9_-]*$/.test(piece));
+}
+
+/**
+ * A text with every opaque secret token replaced by `[REDACTED]`. The single token scan behind
+ * both `secretKind` and redaction, so what is masked is exactly what is reported. Data URIs and
+ * SRI hashes are content and stay. A run is judged piece by piece between `/` first (a token in
+ * a URL or path keeps its context), then whole (a base64 key body line, `/` included).
+ * @param {string} text
+ * @returns {string}
+ */
+export function maskOpaqueTokens(text) {
+  // Odd parts are structured data, wherever it starts (`integrity=sha384-…`): kept as is.
+  return text
+    .split(STRUCTURED_SPLIT)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part.replace(/[A-Za-z0-9+/=_-]{32,}/g, (run) => {
+            // Piece by piece between `/` first. Once a piece is secret, the other pieces decide:
+            // when each is a plain path word (`assets`, `v1`, `img`), the run is a URL or path and
+            // keeps them; when any is not (`Zk8QwErTyUiOpAsDfGh2`), the run is one base64 key and
+            // is masked whole, so no fragment of it survives.
+            const pieces = run.replace(/[A-Za-z0-9+=_-]{32,}/g, (t) => (isOpaqueSecret(t) ? '[REDACTED]' : t));
+            if (pieces !== run) {
+              const others = pieces.split('/').filter((p) => p !== '[REDACTED]' && p !== '');
+              return others.every(isPathWord) ? pieces : '[REDACTED]';
+            }
+            return isOpaqueSecret(run) ? '[REDACTED]' : run;
+          }),
+    )
+    .join('');
+}
+
+/**
+ * Whether a token looks like an opaque credential: 32+ base64/base62-like characters, mixed case
+ * with a digit, high entropy, and not an identifier. An identifier (`useGetUserProfileByIdQueryV2Options`)
+ * is mostly made of words; a random token almost never is.
+ * @param {string} token
+ * @returns {boolean}
+ */
+export function isOpaqueSecret(token) {
+  // A token, or a base64 line (`/` allowed, 40+ characters, as in a PEM body).
+  if (!/^[A-Za-z0-9+=_-]{32,}$/.test(token) && !/^[A-Za-z0-9+/]{40,}={0,2}$/.test(token)) return false;
+  if (!/[a-z]/.test(token) || !/[A-Z]/.test(token) || !/\d/.test(token)) return false;
+  const wordChars = (token.match(/[A-Z]?[a-z]{3,}/g) ?? []).reduce((n, w) => n + w.length, 0);
+  if (wordChars / token.length >= 0.6) return false;
+  // With `/`: a key body line, never a route or path. Those start with `/`, have empty segments,
+  // or are largely made of words (`/api/v2/Users/AbcDef12/Orders`); random base64 is not.
+  if (token.includes('/') && (token.startsWith('/') || token.includes('//') || wordChars / token.length >= 0.3)) return false;
+  return entropy(token) >= 4.2;
 }
 
 /**

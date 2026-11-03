@@ -23,7 +23,7 @@ import { parseScanArgs, scanChanges } from './lib/ts-scan.mjs';
 /** @typedef {import('./lib/ts-rules.mjs').RuleId} RuleId */
 /** @typedef {import('./lib/ts-scan.mjs').ScanItem<RuleId>} RawItem */
 
-export const TOOL_VERSION = '0.1.0';
+export const TOOL_VERSION = '0.2.0';
 
 const HELP = `Usage: find-ts-convention-issues.mjs [options]
 

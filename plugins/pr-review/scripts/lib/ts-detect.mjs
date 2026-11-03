@@ -10,7 +10,7 @@ import {
   UPPER_SNAKE,
   toStyle,
 } from './ts-rules.mjs';
-import { clip, rawItem } from './ts-scan.mjs';
+import { rawItem } from './ts-scan.mjs';
 
 /** @typedef {typeof import('typescript')} TS */
 /** @typedef {import('typescript').Node} Node */
@@ -136,7 +136,7 @@ export function detect(ts, sf, ctx, checker) {
     // V-DEFAULT-EXPORT
     if (ts.isExportAssignment(node)) {
       add('V-DEFAULT-EXPORT', node, node, {
-        subject: clip(text(node)),
+        subject: text(node),
         sig: text(node),
         detail: node.isExportEquals === true ? 'export =' : 'export default',
         exempt: ctx.defaultExportAllowed ? 'E-FRAMEWORK-DEFAULT-EXPORT' : null,
@@ -157,7 +157,7 @@ export function detect(ts, sf, ctx, checker) {
       for (const el of node.exportClause.elements) {
         if (el.name.text !== 'default') continue;
         add('V-DEFAULT-EXPORT', el, node, {
-          subject: clip(text(node)),
+          subject: text(node),
           sig: text(node),
           detail: 'export { … as default }',
           exempt: ctx.defaultExportAllowed ? 'E-FRAMEWORK-DEFAULT-EXPORT' : null,
@@ -195,7 +195,7 @@ export function detect(ts, sf, ctx, checker) {
         add('V-INTERSECTION', node.name, node, {
           subject: node.name.text,
           sig: text(node),
-          detail: clip(t.types.map((op) => text(op)).join(' & ')),
+          detail: t.types.map((op) => text(op)).join(' & '),
           exempt: extendable ? null : 'E-NOT-EXTENDABLE',
         });
       }
@@ -314,7 +314,7 @@ export function detect(ts, sf, ctx, checker) {
     if (ts.isThrowStatement(node)) {
       const fnName = enclosingFunctionName(ts, node);
       add('REVIEW-THROW', node, node, {
-        subject: clip(text(node.expression)),
+        subject: text(node.expression),
         sig: `${text(node)}|${fnName}`,
         detail: fnName,
         exempt: throwExemption(ts, node),

@@ -13,11 +13,12 @@
 import path from 'node:path';
 import { runIfMain } from './lib/cli.mjs';
 import { loadZodConfig } from './lib/config.mjs';
+import { declaredPackages } from './lib/packages.mjs';
 import { repoRoot } from './lib/git.mjs';
 import { parseScanArgs, scanChanges } from './lib/ts-scan.mjs';
 import { RULES, RULE_IDS, SUPPRESSION_MARKER, detect } from './lib/zod-detect.mjs';
 
-export const TOOL_VERSION = '0.1.0';
+export const TOOL_VERSION = '0.2.0';
 
 const HELP = `Usage: find-zod-issues.mjs [options]
 
@@ -43,6 +44,7 @@ export function run(argv) {
   if (opts.help) return { help: HELP };
 
   const root = repoRoot(path.resolve(opts.repo));
+  const packagesFor = declaredPackages(root);
   return scanChanges(root, opts, loadZodConfig(root, opts.config), {
     tool: 'find-zod-issues',
     version: TOOL_VERSION,
@@ -50,7 +52,7 @@ export function run(argv) {
     rules: RULES,
     ruleIds: RULE_IDS,
     marker: SUPPRESSION_MARKER,
-    detect: (ts, sf, _rel, checker) => detect(ts, sf, checker),
+    detect: (ts, sf, rel, checker) => detect(ts, sf, checker, packagesFor(rel)),
   });
 }
 

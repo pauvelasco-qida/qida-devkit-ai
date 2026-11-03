@@ -60,7 +60,8 @@ Excluded by the scanner: <sum of summary.excluded> items (<rule>: <n>, … in th
 - `<VERDICT>` is `FAIL (<n> blocking)` when Blocking has rows, otherwise `PASS`.
 - When Blocking has no rows, keep its heading and write `None.` instead of the table.
 - Escape `|` inside a cell as `\|`.
-- If `typescript.typeInfo` is `none`, `partial` or `disabled`, add one line after Scope: `Note: some files had no type information, so a .parse call on a non-Zod object may be reported when its file imports zod or the receiver is named …Schema.`
+- If the JSON has a `warnings` array, add one line per warning after Scope: `Note: <warning>`.
+- If `typescript.typeInfo` is `none`, `partial` or `disabled`, add one line after Scope: `Note: some files had no type information, so Zod schemas were recognised by their imports and names (see the README's design decisions): a schema from a published package with a neutral name may be missed, and a .parse call in a file that imports zod may be reported on a non-Zod local object.`
 - End with this machine-readable line, on its own:
 
 `<!-- pr-review:zod {"verdict":"PASS|FAIL|NOT_RUN","blocking":["ZOD-…"]} -->`

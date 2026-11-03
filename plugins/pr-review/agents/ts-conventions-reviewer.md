@@ -110,6 +110,7 @@ Excluded by the scanner: <sum of summary.excluded> items (<rule>: <n>, … in th
 - The Rule cell of a `REVIEW` finding is the rule followed by its row, e.g. `REVIEW-THROW T2`.
 - When a table has no rows, keep its heading and write `None.` instead of the table.
 - Escape `|` inside a cell as `\|`.
+- If the JSON has a `warnings` array, add one line per warning after Scope: `Note: <warning>`.
 - If `typescript.typeInfo` is `none`, `partial` or `disabled`, add one line after Scope: `Note: some files had no type information, so intersections over union types may be over-reported.`
 - If `config.disabledRules` is non-empty, add one line after Scope: `Disabled by configuration: <rules, comma-separated>.`
 - End with this machine-readable line, on its own:

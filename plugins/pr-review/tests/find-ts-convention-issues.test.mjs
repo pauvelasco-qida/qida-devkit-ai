@@ -325,3 +325,40 @@ test('a PR without TypeScript changes needs no compiler; CLI errors are JSON wit
   assert.equal(ok.status, 0);
   assert.equal(JSON.parse(ok.stdout).candidates[0].rule, 'V-ANY');
 });
+
+test('code snippets never show a secret', (t) => {
+  const token = ['ghp_', 'T5y6U7i8O9p0A1s2D3f4G5h6J7k8L9z0X1c2'].join('');
+  const dir = makeRepo(t, {
+    head: { 'src/api.ts': `declare const Api: new (k: string) => unknown;\nexport const client: any = new Api('${token}');\n` },
+  });
+  const r = scan(dir);
+  assert.ok(r.candidates.some((/** @type {any} */ c) => c.rule === 'V-ANY'));
+  assert.ok(!JSON.stringify(r).includes(token));
+});
+
+test('file-name items are not masked: the rename suggestion stays usable', (t) => {
+  const name = 'Ab3dEf9hIj2lMn0pQr7tUv5xYz1AbC3dEk';
+  const dir = makeRepo(t, { head: { [`src/${name}.ts`]: 'export const x = 1;\n' } });
+  const r = scan(dir);
+  const c = r.candidates.find((/** @type {any} */ x) => x.rule === 'V-FILE-NAME');
+  assert.ok(c !== undefined);
+  assert.equal(c.subject, `${name}.ts`);
+  assert.ok(typeof c.suggestion === 'string' && !c.suggestion.includes('[REDACTED]'));
+});
+
+test('snippets mask only the secret literals on the printed line', (t) => {
+  const token = ['ghp_', 'Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J3i2'].join('');
+  const dir = makeRepo(t, {
+    head: {
+      'src/m.ts': [
+        "export const header = '-----BEGIN PRIVATE KEY-----';",
+        `export const t: any = ['${token}', header];`,
+        '',
+      ].join('\n'),
+    },
+  });
+  const r = scan(dir);
+  const c = r.candidates.find((/** @type {any} */ x) => x.rule === 'V-ANY');
+  assert.ok(c !== undefined);
+  assert.equal(c.code, "export const t: any = ['[REDACTED]', header];");
+});

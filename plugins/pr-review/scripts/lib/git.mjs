@@ -14,18 +14,31 @@ import { ScannerError } from './errors.mjs';
 const GIT_ENV = { ...process.env, GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' };
 
 /**
- * Runs git and returns stdout. Throws on non-zero exit.
+ * Runs git and returns stdout. Throws on non-zero exit. Every git call of the scanners goes
+ * through here, so flags, environment and limits stay the same everywhere.
  * @param {readonly string[]} args
  * @param {string} cwd
+ * @param {{ input?: string }} [opts] `input` is written to git's stdin.
  * @returns {string}
  */
-export function git(args, cwd) {
+export function git(args, cwd, opts = {}) {
+  return gitBuffer(args, cwd, opts).toString('utf8');
+}
+
+/**
+ * Like `git`, but returns raw stdout bytes (for byte-counted protocols such as `cat-file --batch`).
+ * @param {readonly string[]} args
+ * @param {string} cwd
+ * @param {{ input?: string }} [opts]
+ * @returns {Buffer}
+ */
+export function gitBuffer(args, cwd, opts = {}) {
   return execFileSync('git', ['-c', 'core.quotePath=false', ...args], {
     cwd,
     env: GIT_ENV,
-    encoding: 'utf8',
     maxBuffer: 512 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [opts.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+    ...(opts.input === undefined ? {} : { input: opts.input }),
   });
 }
 
@@ -269,23 +282,87 @@ export function fileAtCommit(root, commit, path) {
 }
 
 /**
- * Tracked files (working tree) whose content contains any of the given fixed strings.
+ * Tracked and untracked (non-ignored) files whose content contains any of the given fixed
+ * strings. One `git grep` pass with the needles on stdin (`-f -`), so neither the needle count
+ * nor their length meets a command-line limit. Exit 1 (no match) is an empty result; any other
+ * failure throws GIT_GREP_FAILED, so callers can say the search did not run.
  * @param {string} root
- * @param {readonly string[]} needles
+ * @param {readonly string[]} needles Fixed strings without line breaks.
  * @param {readonly string[]} pathspecs
  * @returns {string[]} Sorted repo-relative paths.
  */
 export function grepFiles(root, needles, pathspecs) {
-  if (needles.length === 0) return [];
-  const args = ['grep', '-l', '-z', '-F', '--untracked', '--exclude-standard'];
-  for (const n of needles) args.push('-e', n);
-  args.push('--', ...pathspecs);
-  const out = tryGit(args, root);
-  if (out === null) return [];
-  return out
-    .split('\0')
-    .filter((p) => p !== '')
-    .sort();
+  // git grep -f rejects a pattern with a line break (it would split) or a NUL byte (fatal).
+  const patterns = needles.filter((n) => n !== '' && !/[\n\r\0]/.test(n));
+  if (patterns.length === 0) return [];
+  let out;
+  try {
+    out = git(['grep', '-l', '-z', '-F', '--untracked', '--exclude-standard', '-f', '-', '--', ...pathspecs], root, {
+      input: `${patterns.join('\n')}\n`,
+    });
+  } catch (e) {
+    const err = /** @type {{ status?: number | null, stderr?: string | Buffer, message?: string }} */ (e);
+    if (err.status === 1) return [];
+    const reason = String(err.stderr ?? '').trim() || String(err.message ?? e);
+    throw new ScannerError('GIT_GREP_FAILED', `git grep failed (exit ${err.status ?? '?'}): ${reason.split('\n')[0]}`, 3);
+  }
+  return [...new Set(out.split('\0').filter((p) => p !== ''))].sort();
+}
+
+/**
+ * Contents of several files at a commit in one `git cat-file --batch` call (one subprocess,
+ * however many paths; a name with a line break, which the batch protocol cannot carry, is read on
+ * its own). If the batch call itself fails, each file is read on its own. Every path asked for is
+ * expected at the commit: one that cannot be read is listed in `unreadable`, never dropped silently.
+ * @param {string} root
+ * @param {string} commit
+ * @param {readonly string[]} paths Repo-relative paths.
+ * @returns {{ texts: Map<string, string>, unreadable: string[] }}
+ */
+export function filesAtCommit(root, commit, paths) {
+  /** @type {Map<string, string>} */
+  const out = new Map();
+  /** @param {string} p */
+  const readOne = (p) => {
+    const text = fileAtCommit(root, commit, p);
+    if (text !== null) out.set(p, text);
+  };
+  const done = () => ({ texts: out, unreadable: paths.filter((p) => !out.has(p)) });
+  for (const p of paths) if (/[\n\r]/.test(p)) readOne(p);
+  const wanted = paths.filter((p) => !/[\n\r]/.test(p));
+  if (wanted.length === 0) return done();
+  /** @type {Buffer} */
+  let buf;
+  try {
+    buf = gitBuffer(['cat-file', '--batch'], root, { input: wanted.map((p) => `${commit}:${p}\n`).join('') });
+  } catch {
+    for (const p of wanted) readOne(p);
+    return done();
+  }
+  let pos = 0;
+  /** Paths git answered `missing` for: a final answer, not retried. */
+  /** @type {Set<string>} */
+  const missing = new Set();
+  for (const p of wanted) {
+    const eol = buf.indexOf(10, pos);
+    if (eol < 0) break;
+    const header = buf.toString('utf8', pos, eol);
+    pos = eol + 1;
+    const m = /^[0-9a-f]+ (\w+) (\d+)$/.exec(header);
+    const size = m === null ? 0 : Number(m[2]);
+    // `<object> missing`, a tree or a submodule commit: no previous text, a final answer.
+    if (m === null || m[1] !== 'blob') {
+      missing.add(p);
+      pos += m === null ? 0 : size + 1;
+      continue;
+    }
+    if (pos + size > buf.length) break; // output ends inside this blob: the rest is read one by one
+    out.set(p, buf.toString('utf8', pos, pos + size));
+    pos += size + 1;
+  }
+  // Output cut short: whatever the batch did not deliver is read on its own.
+  for (const p of wanted) if (!out.has(p) && !missing.has(p)) readOne(p);
+  return done();
 }
 
 /**
