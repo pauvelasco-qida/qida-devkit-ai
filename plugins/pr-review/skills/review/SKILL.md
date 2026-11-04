@@ -38,6 +38,7 @@ Reviewers always compare **the working tree** (committed, uncommitted and untrac
 3. Trim what is left of the argument and classify it:
    - matches `^#?[0-9]+$` or `^https://github\.com/[^/]+/[^/]+/pull/[0-9]+` → **PR**; `<n>` is the number (without `#`).
    - empty → **auto**.
+   - starts with `-` (an unknown or mistyped option; no git ref starts with `-`) → output exactly ``Unknown option: <what is left>. Usage: /pr-review:review [PR number | PR URL | base ref] [--effort low|medium|high|xhigh|max]`` and stop.
    - anything else → **base ref**, used exactly as given.
 
 **PR**
@@ -51,7 +52,7 @@ Reviewers always compare **the working tree** (committed, uncommitted and untrac
 
 ### 2. Dispatch the reviewers
 
-Launch **all** reviewers from the table **in parallel, in a single message**, one Agent call each. Set only `subagent_type` (from the table), `description` and `prompt`, plus `effort` set to the effort from Step 1 when it is not `default`. Never set `model` or `isolation`, and never set `effort` when the user did not pass `--effort`: the reviewers then run at the agent's default effort. Send every reviewer this prompt, filled in:
+Launch **all** reviewers from the table **in parallel, in a single message**, one Agent call each. Set only `subagent_type` (from the table), `description` and `prompt`, plus `effort` set to the effort from Step 1 when it is not `default`. Never set `model` or `isolation`, and never set `effort` when the user did not pass `--effort`: the reviewers then run at the effort of this session. Send every reviewer this prompt, filled in:
 
 ```
 Review the changes in the repository at <repo root>.
@@ -66,7 +67,7 @@ Wait until every reviewer has returned before Step 3. When they run in the backg
 
 #### 3a. Read each reviewer's result
 
-Every reviewer returns a report in the same shape: a `## <Title> — <verdict>` heading, a summary list, its findings as list items under `### Blocking` and `### Advisory`, other sections, and a **result line** `<!-- pr-review:<key> {...} -->` at the end. For each reviewer, take:
+Every reviewer returns a report in the same shape, written by the plugin's `scripts/render-report.mjs`: a `## <Title> — <verdict>` heading, a summary list, its findings as list items under `### Blocking` and `### Advisory`, other sections, and a **result line** `<!-- pr-review:<key> {...} -->` at the end. For each reviewer, take:
 
 - **Report**: the text of its Agent result from the first line starting with `## ` through its result line, inclusive. Discard anything outside that range.
 - **Verdict**: the `verdict` field of the result line's JSON. A missing `blocking` or `advisory` array counts as empty.
@@ -75,7 +76,7 @@ Every reviewer returns a report in the same shape: a `## <Title> — <verdict>` 
 The reviewer is **not run** when any of these holds. Its verdict is then `NOT_RUN`, and its report becomes the one below, with the matching error:
 
 - The Agent call failed, there is no result line, its JSON does not parse, or `verdict` is not `PASS`, `FAIL` or `NOT_RUN`. Error: `Reviewer returned no machine-readable result.`
-- The report contradicts its result line. That means the items under `### Blocking` do not carry the same set of ids as `blocking`, or those under `### Advisory` not the same set as `advisory`, or the verdict is `FAIL` while `blocking` is empty, or `PASS` while it is not. Error: `Reviewer report does not match its result line.`
+- The report contradicts its result line. That means the items under `### Blocking` do not carry the same set of ids as `blocking`, or those under `### Advisory` not the same set as `advisory`, or the verdict is `FAIL` while `blocking` is empty, or `PASS` while it is not, or the verdict is `PASS` or `FAIL` and the text after ` — ` in its heading is not the one its items give: `FAIL (<n> blocking)` with `<n>` its Blocking items when there are any, otherwise `PASS (<n> advisory)` with `<n>` its Advisory items when there are any, otherwise `PASS`. Error: `Reviewer report does not match its result line.`
 
 ```
 ## <key> — NOT RUN
@@ -115,7 +116,7 @@ Advisory findings do not fail the review.
 - **Reviewer lines.** Write one `- <key>: <reviewer verdict>` line per reviewer, in table order. `<reviewer verdict>` is the text after ` — ` in its report heading, e.g. `FAIL (2 blocking)`, `PASS (1 advisory)`, `PASS` or `NOT RUN`.
 - **`## Blocking (<n>)`** lists the Blocking items of every reviewer, in table order, each reviewer's items in the order of its report. `<n>` is the number of items. Put one blank line between consecutive items, including where one reviewer's items end and the next reviewer's begin. With no items, write `None.` under the heading.
 - **`## Advisory (<n>)`** does the same with the Advisory items. Write the line "Advisory findings do not fail the review." only when there are items. With no items, write `None.` under the heading.
-- **`## Reviewer details`** holds each reviewer's report, in table order. Remove its `### Blocking` and `### Advisory` sections and its result line, and make every heading one level deeper (`## ` becomes `### `, `### ` becomes `#### `). Separate reports by one blank line.
+- **`## Reviewer details`** holds each reviewer's report, in table order. Remove its `### Blocking` and `### Advisory` headings, the items and `None.` line under each, and its result line. Keep every other line, including the "To accept … deliberately" line even when it follows the Blocking or Advisory items. Make every heading one level deeper (`## ` becomes `### `, `### ` becomes `#### `). Separate reports by one blank line.
 - Copy every item and every line of the details character for character. Do not reword, translate, merge, re-rank, renumber or drop anything, and never truncate a list, however long it is.
 
 Example: the combined report for three reviewer reports (synthetic data).

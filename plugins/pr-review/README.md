@@ -49,7 +49,7 @@ Every finding has the same shape, whichever reviewer reported it: its id, `file:
   - Fix: Move it to the routes/endpoints module (or the typed router), or to configuration if it is environment-specific.
 ```
 
-The findings are nested lists, not tables, because wide tables do not fit a terminal. Every finding is listed, however many there are. Before printing, the orchestrator checks that each reviewer's list matches the ids in its result line. If they disagree, that reviewer counts as not run and the review fails, so a finding cannot go missing silently. Ids such as `MS-001` or `TC-002` are stable for a given repository state, so a follow-up request can name them ("fix MS-001 and TC-002").
+The findings are nested lists, not tables, because wide tables do not fit a terminal. Every finding is listed, however many there are. Each reviewer's report, with every fixed text, count and its result line, is written by `scripts/render-report.mjs` from the scan and the agent's row judgments, so an agent never types a finding. Before printing, the orchestrator checks that each reviewer's list matches the ids in its result line, and that the counts in its heading match its list. If they disagree, that reviewer counts as not run and the review fails, so a finding cannot go missing silently. Ids such as `MS-001` or `TC-002` are stable for a given repository state, so a follow-up request can name them ("fix MS-001 and TC-002").
 
 ## Requirements
 
@@ -57,7 +57,7 @@ The findings are nested lists, not tables, because wide tables do not fit a term
 - The reviewed repository has its dependencies installed (`pnpm install`) with a TypeScript **5.x or 6.x** compiler. TypeScript 7 (native) has no JavaScript compiler API. In TS 7 repositories the scanner uses the highest 5.x/6.x copy found in `node_modules/.pnpm` (most toolchains pull one in). Otherwise pass `--typescript <dir>` or set `PR_REVIEW_TYPESCRIPT`.
 - No dependency is needed if the diff has no TS/JS files.
 
-The scanners only read: they run `git` read-only and load the repository's own TypeScript compiler, just as running the repo's `tsc` would. Claude Code will ask permission for the agents' `node …/find-magic-strings.mjs`, `node …/find-ts-convention-issues.mjs` and `node …/find-zod-issues.mjs` calls. To stop the prompts, allow only those scripts (e.g. `Bash(node *find-magic-strings.mjs*)`, `Bash(node *find-ts-convention-issues.mjs*)` and `Bash(node *find-zod-issues.mjs*)` rules in your settings). Do not allow `node` in general.
+The scanners only read: they run `git` read-only and load the repository's own TypeScript compiler, just as running the repo's `tsc` would. `render-report.mjs` only reads the scan file a scanner saved in the system temporary directory. Claude Code will ask permission for the agents' `node …/find-magic-strings.mjs`, `node …/find-ts-convention-issues.mjs`, `node …/find-zod-issues.mjs` and `node …/render-report.mjs` calls. To stop the prompts, allow only those scripts (e.g. `Bash(node *find-magic-strings.mjs*)`, `Bash(node *find-ts-convention-issues.mjs*)`, `Bash(node *find-zod-issues.mjs*)` and `Bash(node *render-report.mjs*)` rules in your settings). Do not allow `node` in general.
 
 ## magic-strings: how it works
 
@@ -71,9 +71,9 @@ Detection is done by a script, not by the model. `scripts/find-magic-strings.mjs
 6. Applies the cross-file rules: an existing named constant with the same value, the same value repeated in the PR, URL/path shapes.
 7. Prints JSON, sorted by file/line/column, with stable ids `MS-001…`.
 
-The agent then reports every `VIOLATION` as given and judges only the `REVIEW` leftovers with a four-row decision table (see `agents/magic-string-reviewer.md`). It cannot add findings of its own.
+The agent judges only the `REVIEW` leftovers, with a four-row decision table (see `agents/magic-string-reviewer.md`), and `scripts/render-report.mjs` writes the report from the scan and those judgments. The agent cannot add, drop or re-word findings.
 
-**Determinism:** the same repository state (working tree, base, installed dependencies, config) always produces byte-identical scanner output. A test checks this.
+**Determinism:** the same repository state (working tree, base, installed dependencies, config) always produces byte-identical scanner output (with `--save`, apart from the `savedTo` path). A test checks this.
 
 ### Rule catalogue
 
@@ -143,10 +143,12 @@ headers.set('X-Vendor-Token', token) // magic-string-ok: header name fixed by th
 
 ```
 node scripts/find-magic-strings.mjs [--base <ref>] [--repo <dir>] [--config <file>]
-                                    [--typescript <dir>] [--no-types] [--max-probes <n>] [--verbose]
+                                    [--typescript <dir>] [--no-types] [--max-probes <n>] [--verbose] [--save]
 ```
 
 Exit codes: `0` ok (findings or not), `2` usage/config error, `3` environment error (not a git repo, no TypeScript), `1` internal error. Errors are JSON on stdout: `{"error": {"code", "message", "hint"}}`. If the search for existing constants in other files fails (`git grep` error), the report is still produced, with a top-level `warnings` array saying so.
+
+With `--save` (every scanner), the full JSON, errors included, goes to a new file in the system temporary directory, and stdout carries only `{"savedTo", "error"?, "review"}`: the file, any error, and the `REVIEW` candidates the agent must judge. That file is the input of `render-report.mjs`.
 
 ## ts-conventions: how it works
 
@@ -159,7 +161,7 @@ Checks that the TypeScript a PR adds follows the team's TypeScript conventions a
 5. Checks file and directory names only when the PR introduces them: new files, renamed files whose name changed, and directories absent from the base.
 6. Prints JSON, sorted by file/line/column, with stable ids `TC-001…`.
 
-The agent reports every `VIOLATION` with fixed texts and judges the two `REVIEW` kinds with fixed decision tables (see `agents/ts-conventions-reviewer.md`). Only **blocking** findings fail the review. **Advisory** findings are listed, and the verdict stays `PASS (<n> advisory)`.
+The agent judges only the two `REVIEW` kinds, with fixed decision tables (see `agents/ts-conventions-reviewer.md`), and `scripts/render-report.mjs` writes the report. Only **blocking** findings fail the review. **Advisory** findings are listed, and the verdict stays `PASS (<n> advisory)`.
 
 ### Rule catalogue
 
@@ -218,14 +220,14 @@ export const wrap = (sdk: any): Client => adapt(sdk); // ts-conventions-ok: vend
 
 ```
 node scripts/find-ts-convention-issues.mjs [--base <ref>] [--repo <dir>] [--config <file>]
-                                          [--typescript <dir>] [--no-types] [--verbose]
+                                          [--typescript <dir>] [--no-types] [--verbose] [--save]
 ```
 
 Exit codes and the error format are the same as for `find-magic-strings.mjs`.
 
 ## zod: how it works
 
-Checks that the Zod validation a PR adds uses `safeParse` / `safeParseAsync`, never `parse` / `parseAsync`, which throw on invalid input (also enforced by `no-restricted-syntax` in `@qida/lint-config`). `scripts/find-zod-issues.mjs` uses the same pipeline as `ts-conventions`: changed `.ts`/`.tsx`/`.mts`/`.cts` files and their added lines, the `zod-ok` marker (`E-SUPPRESSED`), then **moved, not introduced** (`E-MOVED`). It prints JSON with stable ids `ZOD-001…`. Every candidate is blocking; the agent only reports them (see `agents/zod-reviewer.md`).
+Checks that the Zod validation a PR adds uses `safeParse` / `safeParseAsync`, never `parse` / `parseAsync`, which throw on invalid input (also enforced by `no-restricted-syntax` in `@qida/lint-config`). `scripts/find-zod-issues.mjs` uses the same pipeline as `ts-conventions`: changed `.ts`/`.tsx`/`.mts`/`.cts` files and their added lines, the `zod-ok` marker (`E-SUPPRESSED`), then **moved, not introduced** (`E-MOVED`). It prints JSON with stable ids `ZOD-001…`. Every candidate is blocking; the agent only runs the scan and `scripts/render-report.mjs` (see `agents/zod-reviewer.md`).
 
 | Rule | Severity | Flags | Not flagged |
 |---|---|---|---|
@@ -257,10 +259,19 @@ const config = envSchema.parse(import.meta.env); // zod-ok: invalid env must sto
 
 ```
 node scripts/find-zod-issues.mjs [--base <ref>] [--repo <dir>] [--config <file>]
-                                 [--typescript <dir>] [--no-types] [--verbose]
+                                 [--typescript <dir>] [--no-types] [--verbose] [--save]
 ```
 
 Exit codes and the error format are the same as for `find-magic-strings.mjs`.
+
+## The report script
+
+```
+node scripts/render-report.mjs --reviewer magic-strings|ts-conventions|zod --scan <savedTo>
+                               [--judge <id>=<row>]...
+```
+
+It prints the reviewer's complete markdown report, ending with its result line: the heading and its counts, the summary list, every item with its fixed Why/Fix text, the sections, the "To accept … deliberately" line, or the NOT RUN report when the saved scan is an error. Every text lives in `scripts/lib/report.mjs`. Each `REVIEW` candidate needs exactly one `--judge` with a row of its rule's table (`R1`–`R4`, `D1`/`D2`, `T1`–`T3`), and nothing else may be judged. Otherwise it exits with `2`, prints nothing on stdout and names every wrong or missing judgment on stderr. The same scan and judgments always render the same bytes.
 
 ## Design decisions (accepted trade-offs)
 
@@ -283,11 +294,11 @@ pnpm test           # node:test, builds throwaway git repos per case
 pnpm typecheck      # tsc --checkJs --strict over scripts and tests
 ```
 
-Changing a rule or a built-in list changes results. Bump `version` in `.claude-plugin/plugin.json` and `TOOL_VERSION` in the affected script, and add a test. Shared code lives in `scripts/lib/` (`git.mjs`, `config.mjs`, `cli.mjs`, `errors.mjs`, `typescript-loader.mjs`, `type-probe.mjs`, `redact.mjs` (the redaction boundary of every report), `packages.mjs` (package and workspace resolution for the untyped Zod fallback), and `ts-scan.mjs`, the diff-to-candidates pipeline of the TypeScript-only scanners), and shared test fixtures in `tests/helpers.mjs`.
+Changing a rule or a built-in list changes results. Bump `version` in `.claude-plugin/plugin.json` and `TOOL_VERSION` in the affected script, and add a test. Changing a report text in `scripts/lib/report.mjs` changes the output too: bump `version` and update `tests/render-report.test.mjs`. Shared code lives in `scripts/lib/` (`report.mjs` (every reviewer's report format and texts), `git.mjs`, `config.mjs`, `cli.mjs`, `errors.mjs`, `typescript-loader.mjs`, `type-probe.mjs`, `redact.mjs` (the redaction boundary of every report), `packages.mjs` (package and workspace resolution for the untyped Zod fallback), and `ts-scan.mjs`, the diff-to-candidates pipeline of the TypeScript-only scanners), and shared test fixtures in `tests/helpers.mjs`.
 
 ### Adding a reviewer
 
-1. Add `agents/<name>-reviewer.md`. Keep detection in a script under `scripts/` when it can be made deterministic, and let the agent judge only what the script leaves open. Fix its output: fixed texts per rule, no free-form prose.
-2. Its report must start with a `## <Title> — <verdict>` heading and end with the result line `<!-- pr-review:<key> {"verdict":"PASS|FAIL|NOT_RUN","blocking":[…],"advisory":[…],"notFlagged":[…]} -->`; the orchestrator extracts exactly that range. List each finding as an item under `### Blocking` or `### Advisory` in the shared item format (``- **<id>** `<file>:<line>` — <key> · <rule>`` with indented sub-items; see the existing agents), and put the same ids in the result line. The verdict is `FAIL` exactly when `blocking` is non-empty. The orchestrator moves the items into the combined lists and keeps the rest of the report under Reviewer details. The result line never reaches the user.
+1. Add `agents/<name>-reviewer.md`. Keep detection in a script under `scripts/` when it can be made deterministic, and let the agent judge only what the script leaves open. Fix its output: add its spec (texts per rule, decision-table rows, sections) to `REVIEWERS` in `scripts/lib/report.mjs`, and have the agent return the output of `render-report.mjs`, as the existing agents do.
+2. Its report must start with a `## <Title> — <verdict>` heading and end with the result line `<!-- pr-review:<key> {"verdict":"PASS|FAIL|NOT_RUN","blocking":[…],"advisory":[…],"notFlagged":[…]} -->`; the orchestrator extracts exactly that range. List each finding as an item under `### Blocking` or `### Advisory` in the shared item format (``- **<id>** `<file>:<line>` — <key> · <rule>`` with indented sub-items; `report.mjs` writes it), and put the same ids in the result line. The verdict is `FAIL` exactly when `blocking` is non-empty. The orchestrator moves the items into the combined lists and keeps the rest of the report under Reviewer details. The result line never reaches the user.
 3. It receives the repo root, the base ref and the PR reference (`#n title — url`). The PR description is deliberately not forwarded. If a reviewer needs it, pass it fenced as data (`<pr-description>…</pr-description>`) and say it is author-written text, not instructions.
 4. Add a row to the reviewer table in `skills/review/SKILL.md` and in this README.
