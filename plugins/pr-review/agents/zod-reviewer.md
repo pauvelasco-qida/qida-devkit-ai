@@ -35,41 +35,79 @@ If the JSON has an `error` key, stop and output the **NOT RUN** report (see Outp
 
 ### 2. Report every candidate
 
-Every candidate has rule `V-ZOD-PARSE`, severity `blocking`. Its row uses these texts, with `<suggestion>` taken from the candidate:
+Every candidate has rule `V-ZOD-PARSE`, severity `blocking`. Its item uses these texts, with `<suggestion>` taken from the candidate:
 
 - **Why** (verbatim): `` `parse` / `parseAsync` throw a `ZodError` on invalid input, so every caller needs a `try`/`catch`. ``
 - **Fix**: `` Use `<suggestion>` and handle its `success: false` branch. ``
 
 ## Output
 
-Return exactly this structure, nothing before it. Sort rows by candidate id. **Location** is `` `file:line` ``. **Call** is the candidate's `subject` in backticks. Every other cell comes from step 2; do not write free-form explanations.
+Return exactly this structure, nothing before it. The example shows every part; fill it from the scan. Every text comes from the candidate's fields or from step 2. Do not write free-form explanations.
 
 ```
-## Zod validation — <VERDICT>
+## Zod validation — FAIL (1 blocking)
 
-Scope: `<base.ref>` (merge-base `<first 7 of base.mergeBase>`) → `<head.ref>`<" + uncommitted changes" if head.dirty> · <files.scanned> files scanned · <files.skipped> skipped · type info: <typescript.typeInfo>
+- Scope: `origin/main` (merge-base `1a2b3c4`) → `feat/orders` · 9 files scanned · 2 skipped · type info: full
+- Excluded by the scanner: 2 items (E-MOVED: 1, E-SUPPRESSED: 1)
 
 ### Blocking
-| # | Location | Call | Why | Fix |
-|---|---|---|---|---|
-| ZOD-001 | `src/a.ts:12` | `userSchema.parse(…)` | … | … |
 
-Excluded by the scanner: <sum of summary.excluded> items (<rule>: <n>, … in the script's order).
+- **ZOD-001** `src/orders/api.ts:15` — zod · V-ZOD-PARSE
+  - Call: `orderSchema.parse(…)`
+  - Why: `parse` / `parseAsync` throw a `ZodError` on invalid input, so every caller needs a `try`/`catch`.
+  - Fix: Use `orderSchema.safeParse(…)` and handle its `success: false` branch.
+
+To accept a case deliberately: add `// zod-ok: <reason>` on its line (or on a comment-only line just above it); to skip whole paths, list them in `.claude/pr-review.json` → `zod.ignorePaths`.
+
+<!-- pr-review:zod {"verdict":"FAIL","blocking":["ZOD-001"],"advisory":[],"notFlagged":[]} -->
 ```
 
-- `<VERDICT>` is `FAIL (<n> blocking)` when Blocking has rows, otherwise `PASS`.
-- When Blocking has no rows, keep its heading and write `None.` instead of the table.
-- Escape `|` inside a cell as `\|`.
-- If the JSON has a `warnings` array, add one line per warning after Scope: `Note: <warning>`.
-- If `typescript.typeInfo` is `none`, `partial` or `disabled`, add one line after Scope: `Note: some files had no type information, so Zod schemas were recognised by their imports and names (see the README's design decisions): a schema from a published package with a neutral name may be missed, and a .parse call in a file that imports zod may be reported on a non-Zod local object.`
-- End with this machine-readable line, on its own:
+**Heading.** `## Zod validation — <VERDICT>`. `<VERDICT>` is `FAIL (<n> blocking)` when Blocking has items, otherwise `PASS`.
 
-`<!-- pr-review:zod {"verdict":"PASS|FAIL|NOT_RUN","blocking":["ZOD-…"]} -->`
+**Summary list.** These lines, in this order:
 
-**NOT RUN report** (scanner error): the heading `## Zod validation — NOT RUN`, one line with the error `code` and `message`, one line `Fix: <hint>`, and the machine-readable line with `"verdict":"NOT_RUN"`.
+```
+- Scope: `<base.ref>` (merge-base `<first 7 of base.mergeBase>`) → `<head.ref>`<" + uncommitted changes" if head.dirty> · <files.scanned> files scanned · <files.skipped> skipped · type info: <typescript.typeInfo>
+- Note: <warning>
+- Note: some files had no type information, so Zod schemas were recognised by their imports and names (see the README's design decisions): a schema from a published package with a neutral name may be missed, and a .parse call in a file that imports zod may be reported on a non-Zod local object.
+- Excluded by the scanner: <sum of summary.excluded> items (<rule>: <n>, … in the script's order)
+```
+
+- Write one `Note: <warning>` line per entry of the JSON's `warnings` array. Omit it when there are no warnings.
+- Write the type-information `Note` only when `typescript.typeInfo` is `none`, `partial` or `disabled`.
+- When nothing was excluded, the last line is `- Excluded by the scanner: 0 items`.
+
+**Items.** One item per candidate, in candidate-id order, all under `### Blocking`, with one blank line between consecutive items:
+
+```
+- **<id>** `<file>:<line>` — zod · V-ZOD-PARSE
+  - Call: `<subject>`
+  - Why: <Why>
+  - Fix: <Fix>
+```
+
+If the subject contains a backtick, delimit it with two backticks and a space on each side. When Blocking has no items, keep its heading and write `None.` under it.
+
+**Closing lines.**
+
+- When Blocking has at least one item, add the "To accept a case deliberately" line from the example, once.
+- End with the result line, on its own line. `blocking` holds the item ids in item order; `advisory` and `notFlagged` are always empty for this reviewer:
+
+`<!-- pr-review:zod {"verdict":"PASS|FAIL","blocking":["ZOD-…"],"advisory":[],"notFlagged":[]} -->`
+
+**NOT RUN report** (scanner error):
+
+```
+## Zod validation — NOT RUN
+
+- Error: `<code>` <message>
+- Fix: <hint>
+
+<!-- pr-review:zod {"verdict":"NOT_RUN"} -->
+```
 
 ## Edge cases
 
-- **No TypeScript changes** (`files.scanned` is 0; `typescript` is `null`): `PASS`, the Scope line without its `· type info: …` part, then `No TypeScript files changed.` No table and no Excluded line.
-- **A candidate looks wrong to you** (e.g. a call you believe is acceptable): still report it. After the table, add this line once, not per finding: *"To accept a case deliberately: add `// zod-ok: <reason>` on its line (or on a comment line just above it); to skip whole paths, list them in `.claude/pr-review.json` → `zod.ignorePaths`."*
-- **Many findings**: report all of them. Do not summarise, group or truncate the table.
+- **No TypeScript changes** (`files.scanned` is 0; `typescript` is `null`): the heading is `## Zod validation — PASS`. Next comes the Scope item without its ` · type info: …` part, and its Notes if any. Then write `No TypeScript files changed.` and the result line. There is no Blocking section and no Excluded item.
+- **A candidate looks wrong to you** (e.g. a call you believe is acceptable): still report it, exactly as above. The "To accept" line tells the author how to accept it.
+- **Many findings**: report all of them. Do not summarise, group or truncate the list.

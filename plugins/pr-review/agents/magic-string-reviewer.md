@@ -37,16 +37,18 @@ If the JSON has an `error` key, stop and output the **NOT RUN** report (see Outp
 
 ### 2. Report every `VIOLATION`
 
-Copy the **Why** text exactly; fill the **Fix** placeholders from the candidate.
+Every `VIOLATION` is a blocking finding. Copy the **Why** text exactly. Copy the **Fix** text exactly too, filling its `<…>` placeholders from the candidate. When a Fix has variants, write only the one that matches the candidate ("With `existingDefinitions`" means the array is non-empty).
 
 | Rule | Why (verbatim) | Fix |
 |---|---|---|
 | `V-SECRET` | Looks like a credential; value redacted. | Remove it from the code and rotate it; secrets live in AWS Secrets Manager (ADR-IN-007). |
-| `V-FE002-INLINE-QUERY-KEY` | Inline query key (ADR-FE-002 §3). | If `existingDefinitions` is non-empty: use `<first name>` (`<file>:<line>`). Otherwise: add the key to the central query-key dictionary and use it. |
+| `V-FE002-INLINE-QUERY-KEY` | Inline query key (ADR-FE-002 §3). | With `existingDefinitions`: Use `<name>` (`<file>:<line>`). Without: Add the key to the central query-key dictionary and use it. |
 | `V-FE004-UI-TEXT` | Literal text shown to the user (ADR-FE-004). | Replace with `t('<namespace>:<key>')`, add the key to every locale file in this PR, and flag the proposed text for product review (ADR-FE-004 §5–§6). |
-| `V-EXISTING-CONSTANT` | Same value as an existing named definition. | Use `<first name>` (`<file>:<line>`) from `existingDefinitions`. |
+| `V-EXISTING-CONSTANT` | Same value as an existing named definition. | Use `<name>` (`<file>:<line>`). |
 | `V-DUPLICATED` | Same value <occurrencesInPr> times in this PR. | Extract one named constant, `as const` object or literal-union type, and use it in every occurrence. |
 | `V-URL-OR-PATH` | Inline URL or path. | Move it to the routes/endpoints module (or the typed router), or to configuration if it is environment-specific. |
+
+`<name>`, `<file>` and `<line>` are those of the first entry of `existingDefinitions`. `<occurrencesInPr>` is the candidate's field. `t('<namespace>:<key>')` stays as written, because the author chooses the key.
 
 ### 3. Judge every `REVIEW` candidate
 
@@ -59,42 +61,92 @@ Copy the **Why** text exactly; fill the **Fix** placeholders from the candidate.
 | R3 | A value whose exact spelling is imposed by an external specification or a third-party API, and which is not a product choice: Web/DOM/Service-Worker API values (event names, `RequestMode`, cache modes, `visibilityState`, frame types), HTTP header names, URL schemes, library event names (e.g. i18next `languageChanged`), regex replacement patterns, `'true'`/`'false'` compared to an environment variable. A spec-formatted value chosen by the product (a locale such as `es-ES`, a currency, a timezone, a date pattern shown to users) is **not** R3. | not flagged | Spelling imposed by an external spec or library API. |
 | R4 | Everything else, typically a domain or application identifier: status/state/type/kind/role/mode/tab/step value, event or message type, error code, API field name, storage/cookie/query-param key, environment-variable name, feature flag, permission, route or endpoint, port/adapter name, locale/currency/timezone choice, format pattern. | finding | Inline identifier without a compiler-checked name. |
 
-Fixes: R1 uses the `V-FE004-UI-TEXT` fix. R4: *Give it a compiler-checked name (constant, `as const` object or literal-union type) and use it at every occurrence.*
+Fixes: R1 uses the `V-FE004-UI-TEXT` fix. R4: *Give it a compiler-checked name (constant, `as const` object or literal-union type) and use it at every occurrence.* R1 and R4 are blocking findings; R2 and R3 are listed under "Reviewed, not flagged".
 
 ## Output
 
-Return exactly this structure, nothing before it. Sort rows by candidate id. Write values in backticks, truncated to 40 characters. **Context** is the candidate's `detail` field verbatim (empty → `—`). Every other cell comes from the tables above; do not write free-form explanations.
+Return exactly this structure, nothing before it. The example shows every part; fill it from the scan. Every text comes from the candidate's fields or from the tables above. Do not write free-form explanations.
 
 ```
-## Magic strings — <VERDICT>
+## Magic strings — FAIL (2 blocking)
 
-Scope: `<base.ref>` (merge-base `<first 7 of base.mergeBase>`) → `<head.ref>`<" + uncommitted changes" if head.dirty> · <files.scanned> files scanned · <files.skipped> skipped · type info: <typescript.typeInfo>
+- Scope: `origin/main` (merge-base `1a2b3c4`) → `feat/orders` + uncommitted changes · 12 files scanned · 3 skipped · type info: full
+- Excluded by the scanner: 41 literals (E-MODULE: 30, E-TYPED: 11)
 
-### Findings
-| # | Location | Value | Rule | Context | Why | Fix |
-|---|---|---|---|---|---|---|
-| MS-001 | `path/to/file.ts:12` | `value` | V-… / R1 / R4 | detail | … | … |
+### Blocking
+
+- **MS-001** `src/orders/api.ts:12` — magic-strings · V-URL-OR-PATH
+  - Value: `/api/orders` (fetch() arg 1)
+  - Why: Inline URL or path.
+  - Fix: Move it to the routes/endpoints module (or the typed router), or to configuration if it is environment-specific.
+
+- **MS-003** `src/orders/status.ts:4` — magic-strings · R4
+  - Value: `refunded` (=== order.status)
+  - Why: Inline identifier without a compiler-checked name.
+  - Fix: Give it a compiler-checked name (constant, `as const` object or literal-union type) and use it at every occurrence.
 
 ### Reviewed, not flagged
-| # | Location | Value | Row | Context | Reason |
-|---|---|---|---|---|---|
-| MS-002 | `path/to/file.ts:40` | `value` | R3 | detail | … |
 
-Excluded by the scanner: <sum of summary.excluded> literals (<rule>: <n>, … in the script's order).
+- **MS-002** `src/orders/api.ts:14` — magic-strings · R3
+  - Value: `X-Request-Id` (headers.set() arg 1)
+  - Reason: Spelling imposed by an external spec or library API.
+
+To accept a literal deliberately: add `// magic-string-ok: <reason>` on its line (or on a comment-only line just above it), or list it in `.claude/pr-review.json` → `magicStrings.allowValues`. A `V-SECRET` in a known credential format cannot be accepted with the marker, only through `allowValues`; a real credential must be removed from the code.
+
+<!-- pr-review:magic-strings {"verdict":"FAIL","blocking":["MS-001","MS-003"],"advisory":[],"notFlagged":["MS-002"]} -->
 ```
 
-- `<VERDICT>` is `PASS` when Findings is empty, otherwise `FAIL (<number of findings>)`.
-- Omit a table that has no rows and write `None.` under its heading instead.
-- If the JSON has a `warnings` array, add one line per warning after Scope: `Note: <warning>`.
-- If `typescript.typeInfo` is `none` or `partial`, add one line after Scope: `Note: some files had no tsconfig coverage, so typed literals in them could not be proven safe.`
-- End with this machine-readable line, on its own:
+**Heading.** `## Magic strings — <VERDICT>`. `<VERDICT>` is `PASS` when Blocking has no items, otherwise `FAIL (<n> blocking)`, where `<n>` is the number of Blocking items.
 
-`<!-- pr-review:magic-strings {"verdict":"PASS|FAIL|NOT_RUN","findings":["MS-…"],"notFlagged":["MS-…"]} -->`
+**Summary list.** These lines, in this order:
 
-**NOT RUN report** (scanner error): the heading `## Magic strings — NOT RUN`, one line with the error `code` and `message`, one line `Fix: <hint>`, and the machine-readable line with `"verdict":"NOT_RUN"`.
+```
+- Scope: `<base.ref>` (merge-base `<first 7 of base.mergeBase>`) → `<head.ref>`<" + uncommitted changes" if head.dirty> · <files.scanned> files scanned · <files.skipped> skipped · type info: <typescript.typeInfo>
+- Note: <warning>
+- Note: some files had no tsconfig coverage, so typed literals in them could not be proven safe.
+- Excluded by the scanner: <sum of summary.excluded> literals (<rule>: <n>, … in the script's order)
+```
+
+- Write one `Note: <warning>` line per entry of the JSON's `warnings` array. Omit it when there are no warnings.
+- Write the tsconfig `Note` only when `typescript.typeInfo` is `none` or `partial`.
+- When nothing was excluded, the last line is `- Excluded by the scanner: 0 literals`.
+
+**Items.** One item per candidate, in candidate-id order, with one blank line between consecutive items:
+
+```
+- **<id>** `<file>:<line>` — magic-strings · <rule>
+  - Value: `<value>` (<detail>)
+  - Why: <Why>
+  - Fix: <Fix>
+```
+
+- `<rule>` is the script's rule for a `VIOLATION`, and the decision-table row (`R1`…`R4`) for a `REVIEW` candidate.
+- `<detail>` is the candidate's `detail` field, verbatim. Omit ` (<detail>)` when it is empty.
+- Cut a value longer than 40 characters to its first 40 characters followed by `…`. If the value contains a backtick, delimit it with two backticks and a space on each side.
+- A not-flagged candidate has a `Reason: <Reason>` sub-item instead of `Why` and `Fix`.
+
+**Sections.** `### Blocking` lists the findings: every `VIOLATION`, plus R1 and R4. When it has no items, write `None.` under its heading. `### Reviewed, not flagged` lists R2 and R3. Omit that section when it has no items.
+
+**Closing lines.**
+
+- When Blocking has at least one item, add the "To accept a literal deliberately" line from the example, once.
+- End with the result line, on its own line. Its arrays hold the item ids in item order, and `advisory` is always empty for this reviewer:
+
+`<!-- pr-review:magic-strings {"verdict":"PASS|FAIL","blocking":["MS-…"],"advisory":[],"notFlagged":["MS-…"]} -->`
+
+**NOT RUN report** (scanner error):
+
+```
+## Magic strings — NOT RUN
+
+- Error: `<code>` <message>
+- Fix: <hint>
+
+<!-- pr-review:magic-strings {"verdict":"NOT_RUN"} -->
+```
 
 ## Edge cases
 
-- **No TS/JS changes** (`files.scanned` empty): `PASS`, Scope line, then `No TypeScript/JavaScript files changed.`
-- **A candidate looks wrong to you** (e.g. a `VIOLATION` you believe is acceptable): still report it. Add, after the tables, a line *"To accept a literal deliberately: add `// magic-string-ok: <reason>` on its line (or on a comment-only line just above it), or list it in `.claude/pr-review.json` → `magicStrings.allowValues`. A `V-SECRET` in a known credential format cannot be accepted with the marker, only through `allowValues`; a real credential must be removed from the code."* once, not per finding.
-- **Many findings**: report all of them. Do not summarise, group or truncate the table.
+- **No TS/JS changes** (`files.scanned` is 0; `typescript` is `null`): the heading is `## Magic strings — PASS`. Next comes the Scope item without its ` · type info: …` part, and its Notes if any. Then write `No TypeScript/JavaScript files changed.` and the result line. There are no sections and no Excluded item.
+- **A candidate looks wrong to you** (e.g. a `VIOLATION` you believe is acceptable): still report it, exactly as above. The "To accept" line tells the author how to accept it.
+- **Many findings**: report all of them. Do not summarise, group or truncate the list.

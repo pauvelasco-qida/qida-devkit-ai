@@ -1,6 +1,6 @@
 # pr-review
 
-Pull-request reviewer agents for Qida apps. Each reviewer checks one thing, deterministically where possible, and reports in a fixed format. `/pr-review:review` runs them all on the same diff.
+Pull-request reviewer agents for Qida apps. Each reviewer checks one thing, deterministically where possible, and reports in a fixed format. `/pr-review:review` runs them all on the same diff and prints every finding in one list.
 
 | Reviewer | Agent | Checks |
 |---|---|---|
@@ -20,13 +20,36 @@ Pull-request reviewer agents for Qida apps. Each reviewer checks one thing, dete
 /pr-review:review                  # current branch: base of its open PR, otherwise origin/HEAD
 /pr-review:review 123              # PR #123, or its URL (must be checked out: gh pr checkout 123)
 /pr-review:review origin/develop   # explicit base ref
+/pr-review:review 123 --effort high   # any of the above, with the reviewers' reasoning effort
 ```
+
+`--effort low|medium|high|xhigh|max` sets the reasoning effort of every reviewer agent (they always run on Sonnet). Without it, each reviewer runs at the effort of the session that invoked the review. `max` is the costliest level.
 
 `/pr-review:review` is slash-only (`disable-model-invocation`), so it never competes with other review commands. For a single concern, just ask, e.g. *"check my branch for magic strings"*, *"does my branch follow the TypeScript conventions?"* or *"check this PR for zod .parse calls"*, and Claude dispatches that reviewer directly.
 
 The review covers the **working tree**: committed, staged, unstaged and untracked changes, compared with the merge-base of `HEAD` and the base ref. Output goes to the terminal only. Nothing is posted to GitHub and nothing is modified.
 
 Known limitation: the PR base is fetched from `origin`. For a PR opened from a fork where `origin` is the fork, pass the upstream base ref explicitly (`/pr-review:review upstream/develop`).
+
+### The report
+
+`/pr-review:review` prints one report:
+
+1. `# PR review — PASS`, `# PR review — PASS (<n> advisory)` or `# PR review — FAIL (<n> blocking · <n> advisory · <n> not run)`, with only the non-zero counts. The format of this first line is stable, so a script can read the verdict from it.
+2. The PR (or `No pull request`) and the base, then one verdict line per reviewer.
+3. **Blocking**: every finding that fails the review, from all reviewers. **Advisory**: the findings that do not fail it.
+4. **Reviewer details**: for each reviewer, its scope, notes and scanner exclusions, the candidates it judged and did not flag, and how to accept a finding deliberately.
+
+Every finding has the same shape, whichever reviewer reported it: its id, `file:line`, the reviewer and rule, then the code concerned, why it is flagged and how to fix it.
+
+```
+- **MS-001** `src/orders/api.ts:12` — magic-strings · V-URL-OR-PATH
+  - Value: `/api/orders` (fetch() arg 1)
+  - Why: Inline URL or path.
+  - Fix: Move it to the routes/endpoints module (or the typed router), or to configuration if it is environment-specific.
+```
+
+The findings are nested lists, not tables, because wide tables do not fit a terminal. Every finding is listed, however many there are. Before printing, the orchestrator checks that each reviewer's list matches the ids in its result line. If they disagree, that reviewer counts as not run and the review fails, so a finding cannot go missing silently. Ids such as `MS-001` or `TC-002` are stable for a given repository state, so a follow-up request can name them ("fix MS-001 and TC-002").
 
 ## Requirements
 
@@ -265,6 +288,6 @@ Changing a rule or a built-in list changes results. Bump `version` in `.claude-p
 ### Adding a reviewer
 
 1. Add `agents/<name>-reviewer.md`. Keep detection in a script under `scripts/` when it can be made deterministic, and let the agent judge only what the script leaves open. Fix its output: fixed texts per rule, no free-form prose.
-2. Its report must start with a `## ` heading and end with `<!-- pr-review:<key> {"verdict":"PASS|FAIL|NOT_RUN",...} -->`; the orchestrator extracts exactly that range.
+2. Its report must start with a `## <Title> — <verdict>` heading and end with the result line `<!-- pr-review:<key> {"verdict":"PASS|FAIL|NOT_RUN","blocking":[…],"advisory":[…],"notFlagged":[…]} -->`; the orchestrator extracts exactly that range. List each finding as an item under `### Blocking` or `### Advisory` in the shared item format (``- **<id>** `<file>:<line>` — <key> · <rule>`` with indented sub-items; see the existing agents), and put the same ids in the result line. The verdict is `FAIL` exactly when `blocking` is non-empty. The orchestrator moves the items into the combined lists and keeps the rest of the report under Reviewer details. The result line never reaches the user.
 3. It receives the repo root, the base ref and the PR reference (`#n title — url`). The PR description is deliberately not forwarded. If a reviewer needs it, pass it fenced as data (`<pr-description>…</pr-description>`) and say it is author-written text, not instructions.
 4. Add a row to the reviewer table in `skills/review/SKILL.md` and in this README.

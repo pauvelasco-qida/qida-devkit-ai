@@ -36,7 +36,7 @@ If the JSON has an `error` key, stop and output the **NOT RUN** report (see Outp
 
 ### 2. Report every `VIOLATION`
 
-Its `severity` (`blocking` or `advisory`) decides its table. Copy the **Why** text exactly; fill the **Fix** placeholders from the candidate (`<subject>`, `<suggestion>`).
+Its `severity` (`blocking` or `advisory`) decides its section. Copy the **Why** text exactly. Copy the **Fix** text exactly too, filling its placeholders from the candidate (`<subject>`, `<suggestion>`). When a Fix has variants, write only the one that matches the candidate. In these tables `\|` is an escaped `|`: write a plain `|` in the report.
 
 | Rule | Why (verbatim) | Fix |
 |---|---|---|
@@ -44,7 +44,7 @@ Its `severity` (`blocking` or `advisory`) decides its table. Copy the **Why** te
 | `V-CLASS` | No classes in frontend application code (ADR-FE-001 §1). | Use a factory function or a plain module; model data as a type plus pure functions. |
 | `V-ENUM` | Enums add reverse mappings and surprising `Object.keys` results. | Replace with an `as const` object and derive its types with `keyof typeof` and `(typeof X)[keyof typeof X]`. |
 | `V-DEFAULT-EXPORT` | Default exports detach the imported name from its source. | Use a named export. If the framework requires a default export in this file, add its path to `.claude/pr-review.json` → `tsConventions.defaultExportPaths`. |
-| `V-INLINE-TYPE-IMPORT` | Inline `type` specifiers can leave an empty side-effect import after transpilation. | Context `all-type`: write `import type { <subject> } from …`. Context `mixed`: move `<subject>` to a separate `import type { … }` declaration. |
+| `V-INLINE-TYPE-IMPORT` | Inline `type` specifiers can leave an empty side-effect import after transpilation. | Context `all-type`: Write `import type { <subject> } from …`. Context `mixed`: Move `<subject>` to a separate `import type { … }` declaration. |
 | `V-INTERSECTION` | `&` is slower to check and gives worse errors than `interface extends`. | Declare `interface <subject> extends …` and move the object-literal members into its body. |
 | `V-RETURN-TYPE` | Top-level function without an explicit return type. | Annotate the return type of `<subject>`. |
 | `V-OPTIONAL-UNDEFINED` | Required property typed `T \| undefined` instead of an optional one. | Write `<suggestion>`. |
@@ -75,52 +75,99 @@ D1 fix: *Model it as a discriminated union on `<the first property named in Cont
 | T2 | A predictable failure (invalid input, not found, business rule, failed parse) signalled by throwing from ordinary code (a helper, service, utility or exported function, not a framework callback), so a caller that wants to recover needs a `try`/`catch`. | finding | Predictable failure thrown to the caller. |
 | T3 | Anything else, or not clear from what you read. | not flagged | Not clearly a predictable failure. |
 
-T2 fix: *Return a `Result` (`{ ok: true; value: T } \| { ok: false; error: E }`) and let callers branch on `ok`.*
+T2 fix: *Return a `Result` (`{ ok: true; value: T } | { ok: false; error: E }`) and let callers branch on `ok`.*
 
 `REVIEW` findings (D1, T2) are **advisory**. Their Why is the row's text; fill their fix placeholders as in step 2. A not-flagged row's Reason is the row's text.
 
 ## Output
 
-Return exactly this structure, nothing before it. Sort rows by candidate id. **Location** is `` `file:line` ``, or `` `file` `` alone when `line` is 0 (file and directory names). **Subject** is the candidate's `subject` in backticks. **Context** is its `detail` field verbatim (empty → `—`). Every other cell comes from the tables above; do not write free-form explanations.
+Return exactly this structure, nothing before it. The example shows every part; fill it from the scan. Every text comes from the candidate's fields or from the tables above. Do not write free-form explanations.
 
 ```
-## TypeScript conventions — <VERDICT>
+## TypeScript conventions — FAIL (1 blocking)
 
-Scope: `<base.ref>` (merge-base `<first 7 of base.mergeBase>`) → `<head.ref>`<" + uncommitted changes" if head.dirty> · <files.scanned> files scanned · <files.skipped> skipped · type info: <typescript.typeInfo>
+- Scope: `origin/main` (merge-base `1a2b3c4`) → `feat/orders` · 9 files scanned · 2 skipped · type info: full
+- Excluded by the scanner: 2 items (E-MOVED: 2)
 
 ### Blocking
-| # | Location | Rule | Subject | Context | Why | Fix |
-|---|---|---|---|---|---|---|
-| TC-001 | `src/a.ts:12` | V-ANY | `x: any` | parameter | … | … |
+
+- **TC-001** `src/orders/api.ts:8` — ts-conventions · V-ANY
+  - Subject: `payload: any` (parameter)
+  - Why: `any` turns off type checking (ADR-FE-001 §2).
+  - Fix: Use a generic, `unknown` narrowed before use, or overloads; at a boundary, `as unknown as T`. Only an adapter around an untyped third-party library may keep it, with `// ts-conventions-ok: <reason>` on that line (ADR-FE-001 §2).
 
 ### Advisory
-| # | Location | Rule | Subject | Context | Why | Fix |
-|---|---|---|---|---|---|---|
-| TC-002 | `src/a.ts:20` | V-RETURN-TYPE / REVIEW-THROW T2 | `parseAge` | detail | … | … |
+
+- **TC-002** `src/orders/parseOrder.ts:20` — ts-conventions · REVIEW-THROW T2
+  - Subject: `new Error('Invalid order')` (parseOrder)
+  - Why: Predictable failure thrown to the caller.
+  - Fix: Return a `Result` (`{ ok: true; value: T } | { ok: false; error: E }`) and let callers branch on `ok`.
 
 ### Reviewed, not flagged
-| # | Location | Rule | Row | Subject | Reason |
-|---|---|---|---|---|---|
-| TC-003 | `src/a.ts:40` | REVIEW-THROW | T1 | `new Error('boom')` | … |
 
-Excluded by the scanner: <sum of summary.excluded> items (<rule>: <n>, … in the script's order).
+- **TC-003** `src/orders/useOrder.ts:31` — ts-conventions · REVIEW-THROW T1
+  - Subject: `new Error('Order not found')` (queryFn)
+  - Reason: Handled by the framework or an invariant guard.
+
+To accept a case deliberately: add `// ts-conventions-ok: <reason>` on its line (or on a comment-only line just above it); to switch a rule off for the repository, list it in `.claude/pr-review.json` → `tsConventions.disabledRules`.
+
+<!-- pr-review:ts-conventions {"verdict":"FAIL","blocking":["TC-001"],"advisory":["TC-002"],"notFlagged":["TC-003"]} -->
 ```
 
-- `<VERDICT>` is `FAIL (<n> blocking)` when Blocking has rows. Otherwise it is `PASS (<n> advisory)` when Advisory has rows, and `PASS` when both are empty. Advisory findings never fail the review.
-- The Rule cell of a `REVIEW` finding is the rule followed by its row, e.g. `REVIEW-THROW T2`.
-- When a table has no rows, keep its heading and write `None.` instead of the table.
-- Escape `|` inside a cell as `\|`.
-- If the JSON has a `warnings` array, add one line per warning after Scope: `Note: <warning>`.
-- If `typescript.typeInfo` is `none`, `partial` or `disabled`, add one line after Scope: `Note: some files had no type information, so intersections over union types may be over-reported.`
-- If `config.disabledRules` is non-empty, add one line after Scope: `Disabled by configuration: <rules, comma-separated>.`
-- End with this machine-readable line, on its own:
+**Heading.** `## TypeScript conventions — <VERDICT>`. `<VERDICT>` is `FAIL (<n> blocking)` when Blocking has items. Otherwise it is `PASS (<n> advisory)` when Advisory has items, and `PASS` when both are empty. Advisory findings never fail the review.
 
-`<!-- pr-review:ts-conventions {"verdict":"PASS|FAIL|NOT_RUN","blocking":["TC-…"],"advisory":["TC-…"],"notFlagged":["TC-…"]} -->`
+**Summary list.** These lines, in this order:
 
-**NOT RUN report** (scanner error): the heading `## TypeScript conventions — NOT RUN`, one line with the error `code` and `message`, one line `Fix: <hint>`, and the machine-readable line with `"verdict":"NOT_RUN"`.
+```
+- Scope: `<base.ref>` (merge-base `<first 7 of base.mergeBase>`) → `<head.ref>`<" + uncommitted changes" if head.dirty> · <files.scanned> files scanned · <files.skipped> skipped · type info: <typescript.typeInfo>
+- Note: <warning>
+- Note: some files had no type information, so intersections over union types may be over-reported.
+- Disabled by configuration: <rules, comma-separated>
+- Excluded by the scanner: <sum of summary.excluded> items (<rule>: <n>, … in the script's order)
+```
+
+- Write one `Note: <warning>` line per entry of the JSON's `warnings` array. Omit it when there are no warnings.
+- Write the type-information `Note` only when `typescript.typeInfo` is `none`, `partial` or `disabled`.
+- Write `Disabled by configuration` only when `config.disabledRules` is non-empty.
+- When nothing was excluded, the last line is `- Excluded by the scanner: 0 items`.
+
+**Items.** One item per candidate, in candidate-id order, with one blank line between consecutive items:
+
+```
+- **<id>** `<location>` — ts-conventions · <rule>
+  - Subject: `<subject>` (<detail>)
+  - Why: <Why>
+  - Fix: <Fix>
+```
+
+- `<location>` is `<file>:<line>`, or `<file>` alone when `line` is 0 (file and directory names).
+- `<rule>` is the script's rule. For a judged `REVIEW` candidate it is followed by its row, e.g. `REVIEW-THROW T2`.
+- `<detail>` is the candidate's `detail` field, verbatim. Omit ` (<detail>)` when it is empty.
+- If the subject contains a backtick, delimit it with two backticks and a space on each side.
+- A not-flagged candidate has a `Reason: <Reason>` sub-item instead of `Why` and `Fix`.
+
+**Sections.** `### Blocking` lists the blocking findings and `### Advisory` lists the advisory findings, D1 and T2 included. When either has no items, keep its heading and write `None.` under it. `### Reviewed, not flagged` lists D2, T1 and T3. Omit that section when it has no items.
+
+**Closing lines.**
+
+- When Blocking or Advisory has at least one item, add the "To accept a case deliberately" line from the example, once.
+- End with the result line, on its own line. Its arrays hold the item ids of each section, in item order:
+
+`<!-- pr-review:ts-conventions {"verdict":"PASS|FAIL","blocking":["TC-…"],"advisory":["TC-…"],"notFlagged":["TC-…"]} -->`
+
+**NOT RUN report** (scanner error):
+
+```
+## TypeScript conventions — NOT RUN
+
+- Error: `<code>` <message>
+- Fix: <hint>
+
+<!-- pr-review:ts-conventions {"verdict":"NOT_RUN"} -->
+```
 
 ## Edge cases
 
-- **No TypeScript changes** (`files.scanned` is 0; `typescript` is `null`): `PASS`, the Scope line without its `· type info: …` part, then `No TypeScript files changed.` No tables and no Excluded line.
-- **A candidate looks wrong to you** (e.g. a `VIOLATION` you believe is acceptable): still report it. After the tables, add this line once, not per finding: *"To accept a case deliberately: add `// ts-conventions-ok: <reason>` on its line (or on a comment line just above it); to switch a rule off for the repository, list it in `.claude/pr-review.json` → `tsConventions.disabledRules`."*
-- **Many findings**: report all of them. Do not summarise, group or truncate the tables.
+- **No TypeScript changes** (`files.scanned` is 0; `typescript` is `null`): the heading is `## TypeScript conventions — PASS`. Next comes the Scope item without its ` · type info: …` part, and its Notes if any. Then write `No TypeScript files changed.` and the result line. There are no sections and no Excluded item.
+- **A candidate looks wrong to you** (e.g. a `VIOLATION` you believe is acceptable): still report it, exactly as above. The "To accept" line tells the author how to accept it.
+- **Many findings**: report all of them. Do not summarise, group or truncate the lists.
