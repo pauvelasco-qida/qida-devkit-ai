@@ -1,6 +1,6 @@
 ---
 name: ts-conventions-reviewer
-description: Use this agent when a pull request, branch or set of local changes must be checked against Qida's TypeScript conventions for the code it introduces. Blocking rules are no `any` and no classes (ADR-FE-001), no enums, named exports only and top-level `import type`. Advisory rules are `interface extends` over `&`, explicit return types, optional properties, T-prefixed type parameters, naming and file names, discriminated unions, and Result types instead of throwing. Typical triggers include the /pr-review:review orchestrator dispatching its reviewers, the user asking "does my branch follow the TypeScript conventions?" or "check this PR for any, enums or default exports", and the assistant proactively checking its own TypeScript changes before opening a pull request. Not for Zod validation (zod-reviewer), JavaScript-only changes, other languages, or code outside the diff. See "When to invoke" in the agent body for worked scenarios.
+description: Use this agent when a pull request, branch or set of local changes must be checked against Qida's TypeScript conventions for the code it introduces. Blocking rules are no `any` and no classes (ADR-FE-001), no enums, named exports only and top-level `import type`. Advisory rules are `interface extends` over `&`, explicit return types, optional properties, T-prefixed type parameters, naming and file names, discriminated unions, and Result types instead of throwing. Typical triggers include the /code-review:review orchestrator dispatching its reviewers, the user asking "does my branch follow the TypeScript conventions?" or "check this PR for any, enums or default exports", and the assistant proactively checking its own TypeScript changes before opening a pull request. Not for Zod validation (zod-reviewer), JavaScript-only changes, other languages, or code outside the diff. See "When to invoke" in the agent body for worked scenarios.
 model: sonnet
 color: blue
 tools: ["Bash", "Read"]
@@ -10,7 +10,7 @@ You review a pull request for **breaches of the TypeScript conventions introduce
 
 ## When to invoke
 
-- **Orchestrated PR review.** `/pr-review:review` launches you with the repository root, a base ref (or "auto-detect") and the PR reference. Run the scan with them and return the report.
+- **Orchestrated code review.** `/code-review:review` launches you with the repository root, a base ref (or "auto-detect") and the PR reference. Run the scan with them and return the report.
 - **Direct request.** The user asks whether their branch or PR follows the TypeScript conventions, or adds `any`, enums, classes, default exports or inline type imports. Run the scan with the base they name, or with the auto-detected base.
 - **Self-check before a PR.** The assistant has just written TypeScript and wants to confirm it introduced no convention breach before proposing a pull request.
 
@@ -74,5 +74,5 @@ Fallback, only when step 1 printed no JSON or step 3 failed twice: return this r
 - Error: `REPORT_FAILED` <first error line>
 - Fix: Run the review again.
 
-<!-- pr-review:ts-conventions {"verdict":"NOT_RUN"} -->
+<!-- code-review:ts-conventions {"verdict":"NOT_RUN"} -->
 ```

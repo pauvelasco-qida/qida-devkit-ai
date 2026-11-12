@@ -207,7 +207,7 @@ test('the same repository state always produces byte-identical output', (t) => {
 test('test files, configured ignores, allow-list and inline suppression', (t) => {
   const dir = makeRepo(t, {
     head: {
-      '.claude/pr-review.json': JSON.stringify({ magicStrings: { ignorePaths: ['src/legacy/**'], allowValues: ['allowed-value'] } }),
+      '.claude/code-review.json': JSON.stringify({ magicStrings: { ignorePaths: ['src/legacy/**'], allowValues: ['allowed-value'] } }),
       'src/a.test.ts': "export const x = 'whatever-value';\n",
       'src/legacy/old.ts': "export function o(f: (s: string) => void) { f('legacy-value'); }\n",
       'src/c.ts': [
@@ -230,7 +230,7 @@ test('test files, configured ignores, allow-list and inline suppression', (t) =>
   assert.equal(scan(dir).files.skippedPaths, undefined);
   assert.equal(r.summary.excluded['E-ALLOWLISTED'], 1);
   assert.equal(r.summary.excluded['E-SUPPRESSED'], 1);
-  assert.equal(r.config.path, '.claude/pr-review.json');
+  assert.equal(r.config.path, '.claude/code-review.json');
 });
 
 test('secret-looking literals are reported with the value redacted everywhere', (t) => {
@@ -360,7 +360,7 @@ test('the marker does not hide a known-format secret; an explicit allowValues en
   const otherKey = ['AKIA', 'QRSTUVWXYZ', 'ABCDEF'].join('');
   const dir = makeRepo(t, {
     head: {
-      '.claude/pr-review.json': JSON.stringify({ magicStrings: { allowValues: [otherKey] } }),
+      '.claude/code-review.json': JSON.stringify({ magicStrings: { allowValues: [otherKey] } }),
       'src/s.ts': `export const A = '${fakeKey}'; // magic-string-ok\nexport const B = '${otherKey}';\n`,
     },
   });
@@ -828,7 +828,7 @@ test('an allowValues entry in a credential format is warned about, by position o
   const key = ['sk_live_', 'Ab12Cd34Ef56Gh78Ij90'].join('');
   const dir = makeRepo(t, {
     head: {
-      '.claude/pr-review.json': JSON.stringify({ magicStrings: { allowValues: ['ok-value', key] } }),
+      '.claude/code-review.json': JSON.stringify({ magicStrings: { allowValues: ['ok-value', key] } }),
       'src/a.ts': `export const K = '${key}';\n`,
     },
   });
@@ -860,7 +860,7 @@ test('the private-key pattern is linear on a long whitespace run after the heade
 test('the allowValues credential warning appears even when nothing is scanned', (t) => {
   const key = ['sk_live_', 'Ab12Cd34Ef56Gh78Ij90'].join('');
   const dir = makeRepo(t, {
-    head: { '.claude/pr-review.json': JSON.stringify({ magicStrings: { allowValues: [key] } }), 'README.md': '# x\n' },
+    head: { '.claude/code-review.json': JSON.stringify({ magicStrings: { allowValues: [key] } }), 'README.md': '# x\n' },
   });
   const r = scan(dir);
   assert.equal(r.files.scanned, 0);
@@ -1050,7 +1050,7 @@ test('capping a text without separators keeps context and never a partial secret
 
 test('a config file with a byte-order mark is read', (t) => {
   const dir = makeRepo(t, {
-    head: { '.claude/pr-review.json': `﻿${JSON.stringify({ magicStrings: { allowValues: ['bom-value'] } })}`, 'src/a.ts': "declare function f(s: string): void;\nf('bom-value');\n" },
+    head: { '.claude/code-review.json': `﻿${JSON.stringify({ magicStrings: { allowValues: ['bom-value'] } })}`, 'src/a.ts': "declare function f(s: string): void;\nf('bom-value');\n" },
   });
   const r = scan(dir, '--no-types');
   assert.equal(r.summary.excluded['E-ALLOWLISTED'], 1);

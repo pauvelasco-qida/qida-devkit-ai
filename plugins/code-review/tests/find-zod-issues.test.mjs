@@ -96,7 +96,7 @@ test('moved calls, the zod-ok marker and the zod config section', (t) => {
   const dir = makeRepo(t, {
     base: { 'src/schemas.ts': SCHEMAS, 'src/old.ts': moved },
     head: {
-      '.claude/pr-review.json': JSON.stringify({ tsConventions: { disabledRules: ['V-ANY'] }, zod: { ignorePaths: ['src/legacy/**'], extra: 1 } }),
+      '.claude/code-review.json': JSON.stringify({ tsConventions: { disabledRules: ['V-ANY'] }, zod: { ignorePaths: ['src/legacy/**'], extra: 1 } }),
       'src/old.ts': null,
       'src/new.ts': src([
         ...moved.trimEnd().split('\n'),

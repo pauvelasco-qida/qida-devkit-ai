@@ -80,7 +80,7 @@ test('blocking rules: any, enum, class (ADR-FE-001), default export, inline type
 test('framework default exports are allowed only where configured', (t) => {
   const dir = makeRepo(t, {
     head: {
-      '.claude/pr-review.json': JSON.stringify({ tsConventions: { defaultExportPaths: ['src/pages/**'] } }),
+      '.claude/code-review.json': JSON.stringify({ tsConventions: { defaultExportPaths: ['src/pages/**'] } }),
       'src/pages/home.tsx': src(['export default function Home() { return <div />; }']),
       'src/widgets/card.tsx': src(['export default function Card() { return <div />; }']),
     },
@@ -309,7 +309,7 @@ test('the suppression marker covers its own line, or the next one from a comment
 test('configuration: disabled rules, ignored paths, test files; unknown rules are rejected', (t) => {
   const dir = makeRepo(t, {
     head: {
-      '.claude/pr-review.json': JSON.stringify({
+      '.claude/code-review.json': JSON.stringify({
         magicStrings: { allowValues: ['x'] },
         tsConventions: { disabledRules: ['V-RETURN-TYPE'], ignorePaths: ['src/legacy/**'] },
       }),
@@ -326,7 +326,7 @@ test('configuration: disabled rules, ignored paths, test files; unknown rules ar
   assert.deepEqual(r.files.skippedByReason, { 'ignored-by-config': 1, test: 1 });
 
   const bad = makeRepo(t, {
-    head: { '.claude/pr-review.json': JSON.stringify({ tsConventions: { disabledRules: ['V-NOPE'], extra: 1 } }), 'src/a.ts': src(['']) },
+    head: { '.claude/code-review.json': JSON.stringify({ tsConventions: { disabledRules: ['V-NOPE'], extra: 1 } }), 'src/a.ts': src(['']) },
   });
   assert.throws(() => scan(bad), (/** @type {any} */ e) => e.code === 'CONFIG_INVALID' && /V-NOPE/.test(e.message));
 });

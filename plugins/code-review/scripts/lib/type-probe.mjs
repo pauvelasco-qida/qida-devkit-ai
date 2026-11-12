@@ -25,7 +25,7 @@ import { enclosingStatementSpan, probeRegion } from './classify.mjs';
  */
 
 /** Replacement value: no literal union will ever contain it. */
-const PROBE = '__pr_review_probe__';
+const PROBE = '__code_review_probe__';
 /** Upper bound of batch rounds per file before the remaining literals are reported as unknown. */
 const MAX_ROUNDS = 25;
 

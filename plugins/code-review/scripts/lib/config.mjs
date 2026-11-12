@@ -4,7 +4,7 @@ import path from 'node:path';
 import { ScannerError } from './errors.mjs';
 
 /**
- * Per-repository configuration, read from `.claude/pr-review.json` → `magicStrings`.
+ * Per-repository configuration, read from `.claude/code-review.json` → `magicStrings`.
  * The file is committed so every reviewer and every run applies the same rules (ADR-TR-002 §1).
  * @typedef {object} MagicStringsConfig
  * @property {string[]} ignorePaths Extra globs (repo-relative, `**` supported) to skip.
@@ -31,7 +31,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   logFunctions: [],
 });
 
-export const CONFIG_RELATIVE_PATH = '.claude/pr-review.json';
+export const CONFIG_RELATIVE_PATH = '.claude/code-review.json';
 
 const STRING_ARRAY_KEYS = /** @type {const} */ ([
   'ignorePaths',
@@ -127,7 +127,7 @@ export function loadConfig(root, explicitPath) {
 }
 
 /**
- * Per-repository configuration, read from `.claude/pr-review.json` → `tsConventions`.
+ * Per-repository configuration, read from `.claude/code-review.json` → `tsConventions`.
  * @typedef {object} TsConventionsConfig
  * @property {string[]} ignorePaths Extra globs (repo-relative, `**` supported) to skip.
  * @property {string[]} defaultExportPaths Globs of files where the framework requires a default export.
@@ -172,7 +172,7 @@ export function loadTsConventionsConfig(root, explicitPath, knownRules) {
 }
 
 /**
- * Per-repository configuration, read from `.claude/pr-review.json` → `zod`.
+ * Per-repository configuration, read from `.claude/code-review.json` → `zod`.
  * @typedef {object} ZodConfig
  * @property {string[]} ignorePaths Extra globs (repo-relative, `**` supported) to skip.
  */

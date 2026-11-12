@@ -57,7 +57,7 @@ export function write(dir, files) {
  * @returns {string}
  */
 export function makeRepo(t, { base = {}, head = {}, commitHead = true, rename }) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-review-test-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'code-review-test-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   /** @param {string[]} args */
   const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'pipe', env: GIT_ENV });

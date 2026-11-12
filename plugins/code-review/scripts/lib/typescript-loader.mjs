@@ -74,7 +74,7 @@ function candidateDirs(root, extraDirs) {
 /**
  * Loads a TypeScript compiler with the classic API.
  * @param {string} root Repository root.
- * @param {string | null} explicit Path given with --typescript (or PR_REVIEW_TYPESCRIPT); when set, only it is tried.
+ * @param {string | null} explicit Path given with --typescript (or CODE_REVIEW_TYPESCRIPT); when set, only it is tried.
  * @param {readonly string[]} extraDirs
  * @returns {{ ts: TS, dir: string }}
  */
@@ -90,6 +90,6 @@ export function loadTypeScript(root, explicit, extraDirs) {
       ? `No TypeScript compiler with the classic API (<= 6.x) at ${explicit}.`
       : 'No TypeScript compiler with the classic API (<= 6.x) found in the repository.',
     3,
-    'Install dependencies (`pnpm install`) or point --typescript / PR_REVIEW_TYPESCRIPT at a typescript 5.x or 6.x package directory.',
+    'Install dependencies (`pnpm install`) or point --typescript / CODE_REVIEW_TYPESCRIPT at a typescript 5.x or 6.x package directory.',
   );
 }
