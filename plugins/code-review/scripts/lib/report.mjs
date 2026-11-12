@@ -5,7 +5,7 @@
  * included. Every fixed text of a report lives here, so an agent never copies or formats one and
  * the same scan plus the same judgments always render the same bytes.
  *
- * The report shape is the contract with `/code-review:review` (skills/review/SKILL.md, step 3):
+ * The report shape is the contract with `/code-review:code-review` (commands/code-review.md, step 3):
  * a `## <Title> — <verdict>` heading, a summary list, findings as list items under `### Blocking`
  * and `### Advisory`, other sections, and the result line `<!-- code-review:<key> {...} -->`.
  */
@@ -40,6 +40,7 @@ const CONFIG_REF = `\`${CONFIG_RELATIVE_PATH}\``;
  * @property {{ code: string, message: string, hint: string | null }} [error]
  * @property {{ ref: string, mergeBase: string }} base
  * @property {{ ref: string, dirty: boolean }} head
+ * @property {{ changes: 'worktree' | 'staged' | 'commit', paths: string[] }} [scope] Absent in older scans: the working tree, every path.
  * @property {{ typeInfo: string } | null} typescript
  * @property {{ disabledRules?: string[] }} [config]
  * @property {{ scanned: number, skipped: number }} files
@@ -464,8 +465,15 @@ export function renderReport(key, scan, judgments) {
   const verdict = nBlocking > 0 ? `FAIL (${nBlocking} blocking)` : nAdvisory > 0 ? `PASS (${nAdvisory} advisory)` : 'PASS';
 
   const { base, head, files, typescript } = scan;
+  const changes = scan.scope?.changes ?? 'worktree';
+  const paths = scan.scope?.paths ?? [];
+  const side =
+    changes === 'staged'
+      ? 'staged changes'
+      : `\`${head.ref}\`${changes === 'worktree' && head.dirty ? ' + uncommitted changes' : ''}`;
   const scope =
-    `- Scope: \`${base.ref}\` (merge-base \`${base.mergeBase.slice(0, 7)}\`) → \`${head.ref}\`${head.dirty ? ' + uncommitted changes' : ''}` +
+    `- Scope: \`${base.ref}\` (merge-base \`${base.mergeBase.slice(0, 7)}\`) → ${side}` +
+    (paths.length === 0 ? '' : ` · paths ${paths.map((p) => `\`${oneLine(p)}\``).join(', ')}`) +
     ` · ${files.scanned} files scanned · ${files.skipped} skipped${typescript === null ? '' : ` · type info: ${typescript.typeInfo}`}`;
   const summary = [scope, ...(scan.warnings ?? []).map((w) => `- Note: ${oneLine(w)}`)];
 

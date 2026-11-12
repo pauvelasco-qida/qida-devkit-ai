@@ -2,18 +2,27 @@
 /**
  * Shared pipeline of the TypeScript-only scanners (find-ts-convention-issues, find-zod-issues).
  *
- * Compares the working tree with the merge-base of HEAD and a base branch, parses every changed
- * TypeScript file with the repository's TypeScript compiler, runs the scanner's detector and keeps
+ * Compares the working tree (or the index, or a commit) with the merge-base of HEAD and a base
+ * branch, optionally limited to some paths, parses every changed TypeScript file with the repository's TypeScript compiler, runs the scanner's detector and keeps
  * the items introduced on an added line. Each scanner supplies only its rules, its detector and its
  * suppression marker; the same repository state always produces byte-identical output.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { scriptKind, sortBy } from './cli.mjs';
 import { isTypeScriptFile, skipReason } from './config.mjs';
 import { ScannerError } from './errors.mjs';
-import { changedFiles, deletedFiles, filesAtCommit, headInfo, mergeBase, resolveBaseRef } from './git.mjs';
+import {
+  changedFiles,
+  deletedFiles,
+  existsAtTarget,
+  filesAtCommit,
+  filesAtTarget,
+  headInfo,
+  mergeBase,
+  resolveBaseRef,
+  resolveTarget,
+} from './git.mjs';
 import { capText } from './classify.mjs';
 import { clip, redactRecords, snippetMasker } from './redact.mjs';
 import { TypeProber } from './type-probe.mjs';
@@ -37,6 +46,7 @@ function capStored(s) {
 /** @typedef {import('typescript').SourceFile} SourceFile */
 /** @typedef {import('typescript').TypeChecker} TypeChecker */
 /** @typedef {import('./git.mjs').ChangedFile} ChangedFile */
+/** @typedef {import('./git.mjs').Target} Target */
 
 /**
  * One potential breach found in a file. `exempt` names the E-* rule when an exemption applies.
@@ -65,6 +75,9 @@ function capStored(s) {
 /**
  * @typedef {object} ScanOptions
  * @property {string | null} base
+ * @property {string | null} head Commit to review instead of the working tree (`--head`).
+ * @property {boolean} staged Review only the staged changes (`--staged`).
+ * @property {string[]} paths Git pathspecs that limit the reviewed files (`--path`, repeatable).
  * @property {string} repo
  * @property {string | null} config
  * @property {string | null} typescript
@@ -170,6 +183,9 @@ export function parseScanArgs(argv, defaults = {}) {
   /** @type {NonNullable<import('node:util').ParseArgsConfig['options']>} */
   const options = {
     base: { type: 'string' },
+    head: { type: 'string' },
+    staged: { type: 'boolean', default: false },
+    path: { type: 'string', multiple: true },
     repo: { type: 'string' },
     config: { type: 'string' },
     typescript: { type: 'string' },
@@ -195,8 +211,13 @@ export function parseScanArgs(argv, defaults = {}) {
     throw new ScannerError('USAGE', '--max-probes must be an integer >= 0.', 2);
   }
   const envTs = process.env.CODE_REVIEW_TYPESCRIPT;
+  const paths = Array.isArray(v.path) ? v.path.map(String) : [];
+  if (paths.some((p) => p.trim() === '')) throw new ScannerError('USAGE', '--path needs a non-empty pathspec.', 2);
   return {
     base: typeof v.base === 'string' ? v.base : null,
+    head: typeof v.head === 'string' ? v.head : null,
+    staged: v.staged === true,
+    paths,
     repo: typeof v.repo === 'string' ? v.repo : process.cwd(),
     config: typeof v.config === 'string' ? v.config : null,
     typescript: typeof v.typescript === 'string' ? v.typescript : envTs !== undefined && envTs !== '' ? envTs : null,
@@ -377,19 +398,55 @@ export function unreadableWarning(unreadable) {
 }
 
 /**
- * First steps every scanner shares: resolve the base and the merge-base, read HEAD, list the
- * changed files and split them into scanned, skipped and other files.
+ * First steps every scanner shares: resolve the base, the reviewed side (target) and the
+ * merge-base, read HEAD, list the changed files and split them into scanned, skipped and other
+ * files.
  * @param {string} root
  * @param {ScanOptions} opts
  * @param {{ ignorePaths: readonly string[] }} config
  * @param {(p: string) => boolean} isSource
  */
 export function openScan(root, opts, config, isSource) {
+  const target = resolveTarget(root, opts);
   const baseRef = resolveBaseRef(root, opts.base);
-  const base = mergeBase(root, baseRef);
-  const head = headInfo(root);
-  const parts = partitionChanged(root, changedFiles(root, base), config, isSource);
-  return { base, scanned: parts.scanned, header: { base: { ref: baseRef, mergeBase: base }, head }, files: filesSection(parts, opts.verbose) };
+  const base = mergeBase(root, baseRef, target);
+  const head = target.kind === 'commit' ? { ref: target.ref, sha: target.sha, dirty: false } : headInfo(root);
+  const changed = changedFiles(root, base, target, opts.paths);
+  const parts = partitionChanged(root, changed, config, isSource, target);
+  const scope = { changes: target.kind, paths: opts.paths };
+  /** @type {MoveSources} */
+  const moves = { target, limited: opts.paths.length > 0, renamedFrom: new Set(changed.flatMap((f) => (f.status === 'renamed' && f.oldPath !== null ? [f.oldPath] : []))) };
+  return { base, target, moves, scanned: parts.scanned, header: { base: { ref: baseRef, mergeBase: base }, head, scope }, files: filesSection(parts, opts.verbose) };
+}
+
+/**
+ * Reader of the scanned files' texts on the target side: from disk, one at a time, for the
+ * working tree; in one git call for the index or a commit. A text is handed out once.
+ * @param {string} root
+ * @param {Target} target
+ * @param {readonly ChangedFile[]} scanned
+ * @returns {(rel: string) => string | null} Null when the file cannot be read.
+ */
+export function targetReader(root, target, scanned) {
+  if (target.kind === 'worktree') return (rel) => filesAtTarget(root, target, [rel]).texts.get(rel) ?? null;
+  const { texts } = filesAtTarget(root, target, scanned.map((f) => f.path));
+  return (rel) => {
+    const text = texts.get(rel) ?? null;
+    texts.delete(rel);
+    return text;
+  };
+}
+
+/**
+ * The report warning for scanned files whose text could not be read, or none.
+ * @param {readonly string[]} unread
+ * @returns {string[]}
+ */
+export function unreadWarning(unread) {
+  if (unread.length === 0) return [];
+  const list = [...unread].sort().slice(0, 5).join(', ');
+  const more = unread.length > 5 ? ` and ${unread.length - 5} more` : '';
+  return [`Could not read ${list}${more}: not scanned.`];
 }
 
 /**
@@ -456,9 +513,10 @@ function onAddedLines(gitLines, startLine, endLine, added) {
  * @param {readonly ChangedFile[]} changed
  * @param {{ ignorePaths: readonly string[] }} config
  * @param {(p: string) => boolean} isSource
+ * @param {Target} [target] Where the files are read from (default: the working tree).
  * @returns {ChangedParts}
  */
-export function partitionChanged(root, changed, config, isSource) {
+export function partitionChanged(root, changed, config, isSource, target = { kind: 'worktree' }) {
   /** @type {ChangedParts} */
   const parts = { scanned: [], skipped: [], otherFiles: 0 };
   for (const f of changed) {
@@ -468,7 +526,7 @@ export function partitionChanged(root, changed, config, isSource) {
     }
     const reason = skipReason(f.path, config);
     if (reason !== null) parts.skipped.push({ path: f.path, reason });
-    else if (fs.existsSync(path.join(root, f.path))) parts.scanned.push(f);
+    else if (existsAtTarget(root, target, f.path)) parts.scanned.push(f);
   }
   return parts;
 }
@@ -493,15 +551,25 @@ export function filesSection({ scanned, skipped, otherFiles }, verbose) {
 }
 
 /**
+ * Where moved code can come from, besides the scanned files' own base versions.
+ * @typedef {object} MoveSources
+ * @property {Target} target
+ * @property {boolean} limited Whether --path limits the reviewed files. A file renamed from outside
+ *   the paths then shows as added, so every file renamed away counts as deleted too.
+ * @property {Set<string>} renamedFrom Old paths of the reviewed renamed files (already tallied).
+ */
+
+/**
  * Base content of the source files the PR deletes: code moved out of them is not introduced.
  * @param {string} root
  * @param {string} base Merge-base sha.
  * @param {{ ignorePaths: readonly string[] }} config
  * @param {(p: string) => boolean} isSource
+ * @param {MoveSources} [moves]
  * @returns {{ sources: { path: string, text: string }[], unreadable: string[] }}
  */
-export function deletedSources(root, base, config, isSource) {
-  const paths = deletedFiles(root, base).filter((p) => isSource(p) && skipReason(p, config) === null);
+export function deletedSources(root, base, config, isSource, moves = { target: { kind: 'worktree' }, limited: false, renamedFrom: new Set() }) {
+  const paths = deletedFiles(root, base, moves.target, !moves.limited).filter((p) => !moves.renamedFrom.has(p)).filter((p) => isSource(p) && skipReason(p, config) === null);
   const { texts, unreadable } = filesAtCommit(root, base, paths);
   return {
     sources: paths.flatMap((p) => {
@@ -539,7 +607,7 @@ export function tallyBy(counts, items, sign, key) {
 export function scanChanges(root, opts, loaded, scanner) {
   const { config } = loaded;
   const disabledRules = config.disabledRules ?? [];
-  const { base, scanned, header, files } = openScan(root, opts, config, isTypeScriptFile);
+  const { base, target, moves, scanned, header, files } = openScan(root, opts, config, isTypeScriptFile);
 
   /** @type {Record<string, number>} */
   const excludedCounts = {};
@@ -574,10 +642,18 @@ export function scanChanges(root, opts, loaded, scanner) {
   /** @type {Working[]} */
   const work = [];
   let filesWithTypes = 0;
+  const read = targetReader(root, target, scanned);
+  /** @type {string[]} */
+  const unread = [];
 
   for (const f of scanned) {
     const abs = path.join(root, f.path);
-    const text = fs.readFileSync(abs, 'utf8');
+    const text = read(f.path);
+    if (text === null) {
+      unread.push(f.path);
+      continue;
+    }
+    // The type checker reads the files on disk: it is used only when they hold the same text.
     const project = prober === null ? null : prober.projectFor(abs);
     const programSf = project === null ? undefined : project.program.getSourceFile(abs);
     /** @type {TypeChecker | null} */
@@ -614,9 +690,9 @@ export function scanChanges(root, opts, loaded, scanner) {
 
   // Code moved out of deleted files is not introduced either (read only when something can move).
   const movable = work.some((w) => w.item.line > 0);
-  const deleted = movable ? deletedSources(root, base, config, isTypeScriptFile) : { sources: [], unreadable: [] };
+  const deleted = movable ? deletedSources(root, base, config, isTypeScriptFile, moves) : { sources: [], unreadable: [] };
   for (const d of deleted.sources) tallyBy(balance, scanner.detect(ts, parse(d.path, d.text), d.path, null), -1, bySig);
-  const baseWarnings = unreadableWarning([...unreadable, ...deleted.unreadable]);
+  const baseWarnings = [...unreadWarning(unread), ...unreadableWarning([...unreadable, ...deleted.unreadable])];
   if (baseWarnings.length > 0) report.warnings = baseWarnings;
 
   report.typescript = {

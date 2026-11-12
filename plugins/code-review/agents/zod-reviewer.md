@@ -1,6 +1,6 @@
 ---
 name: zod-reviewer
-description: Use this agent when a pull request, branch or set of local changes must be checked for Zod validation that throws. Every `.parse()` / `.parseAsync()` call on a Zod schema that the change introduces is blocking; it must use `safeParse` / `safeParseAsync` and handle the failure branch. Typical triggers include the /code-review:review orchestrator dispatching its reviewers, the user asking "does my branch use Zod safeParse?" or "check this PR for zod .parse calls", and the assistant proactively checking its own TypeScript changes before opening a pull request. Not for the other TypeScript conventions (ts-conventions-reviewer), JavaScript-only changes, or code outside the diff. See "When to invoke" in the agent body for worked scenarios.
+description: Use this agent when a pull request, branch or set of local changes must be checked for Zod validation that throws. Every `.parse()` / `.parseAsync()` call on a Zod schema that the change introduces is blocking; it must use `safeParse` / `safeParseAsync` and handle the failure branch. Typical triggers include the /code-review:code-review orchestrator dispatching its reviewers, the user asking "does my branch use Zod safeParse?" or "check this PR for zod .parse calls", and the assistant proactively checking its own TypeScript changes before opening a pull request. Not for the other TypeScript conventions (ts-conventions-reviewer), JavaScript-only changes, or code outside the diff. See "When to invoke" in the agent body for worked scenarios.
 model: sonnet
 color: green
 tools: ["Bash", "Read"]
@@ -10,8 +10,8 @@ You review a pull request for **Zod validation that throws, introduced by it**: 
 
 ## When to invoke
 
-- **Orchestrated code review.** `/code-review:review` launches you with the repository root, a base ref (or "auto-detect") and the PR reference. Run the scan with them and return the report.
-- **Direct request.** The user asks whether their branch or PR uses Zod `safeParse`, or adds Zod `.parse` / `.parseAsync` calls. Run the scan with the base they name, or with the auto-detected base.
+- **Orchestrated code review.** `/code-review:code-review` launches you with the repository root, a base ref (or "auto-detect"), the changes to review, the paths and the PR reference. Run the scan with them and return the report.
+- **Direct request.** The user asks whether their branch or PR uses Zod `safeParse`, or adds Zod `.parse` / `.parseAsync` calls. Run the scan with the base they name, or with the auto-detected base, and with the scope they name: a commit or commit range, only the staged changes, or some paths.
 - **Self-check before a PR.** The assistant has just written TypeScript that validates data with Zod and wants to confirm it introduced no throwing `.parse` call before proposing a pull request.
 
 ## Hard rules
@@ -27,10 +27,10 @@ You review a pull request for **Zod validation that throws, introduced by it**: 
 ### 1. Run the scan, exactly once
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/find-zod-issues.mjs" --repo "<REPO_ROOT>" --base "<BASE>" --save
+node "${CLAUDE_PLUGIN_ROOT}/scripts/find-zod-issues.mjs" --repo "<REPO_ROOT>" --base "<BASE>" <SCOPE> --save
 ```
 
-`<REPO_ROOT>` is the repository path from your prompt; omit `--repo` when none was given (the current directory is used). Omit `--base "<BASE>"` when no base ref was given or it is "auto-detect" (the script then uses origin/HEAD, then origin/main|master|develop). Use a Bash timeout of 600000 ms. It prints one JSON object with `savedTo`, the full scan for step 2 (and `error` when the scan failed). Do not retry with other flags, and do not fall back to reading the diff.
+`<REPO_ROOT>` is the repository path from your prompt; omit `--repo` when none was given (the current directory is used). Omit `--base "<BASE>"` when no base ref was given or it is "auto-detect" (the script then uses origin/HEAD, then origin/main|master|develop). `<SCOPE>` comes from your prompt: `--head '<head>'` when Changes is `commit <head>`, `--staged` when it is `staged`, nothing when it is `working tree` or not given; then one `--path '<pathspec>'` per entry of Paths, in order, and none when Paths is `all` or not given. Wrap each value in single quotes, writing a `'` inside it as `'\''`. Use a Bash timeout of 600000 ms. It prints one JSON object with `savedTo`, the full scan for step 2 (and `error` when the scan failed). Do not retry with other flags, and do not fall back to reading the diff.
 
 ### 2. Write the report
 

@@ -46,6 +46,12 @@ function real(p) {
   }
 }
 
+/** Help text of the scope options every scanner takes (parsed by `parseScanArgs`). */
+export const SCOPE_HELP = `  --head <ref>        Review this commit instead of the working tree (vs. its merge-base with --base)
+  --staged            Review only the staged changes (the index) instead of the working tree
+  --path <pathspec>   Review only files matching this git pathspec (repeatable; ':!<spec>' excludes)
+`;
+
 /** Help text of the option `runIfMain` handles for every scanner. */
 export const SAVE_HELP = `  --save              Save the full JSON to a new temporary file and print only its path
                       ("savedTo"), any "error" and the REVIEW candidates ("review"):

@@ -8,7 +8,7 @@
     "node": ">=20.11"
   },
   "scripts": {
-    "test": "node --test tests/find-magic-strings.test.mjs tests/find-ts-convention-issues.test.mjs tests/find-zod-issues.test.mjs tests/git.test.mjs tests/packages.test.mjs tests/render-report.test.mjs",
+    "test": "node --test tests/find-magic-strings.test.mjs tests/find-ts-convention-issues.test.mjs tests/find-zod-issues.test.mjs tests/git.test.mjs tests/packages.test.mjs tests/render-report.test.mjs tests/scope.test.mjs",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {

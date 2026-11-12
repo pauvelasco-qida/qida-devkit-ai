@@ -72,7 +72,7 @@ const tc = (id, rule, severity, over = {}) => ({
 const judge = (o) => new Map(Object.entries(o));
 
 /**
- * The orchestrator's consistency check (skills/review/SKILL.md, step 3a): the items under
+ * The orchestrator's consistency check (commands/code-review.md, step 3a): the items under
  * `### Blocking` / `### Advisory` carry the result line's ids, and the heading gives their count.
  * @param {string} report
  */

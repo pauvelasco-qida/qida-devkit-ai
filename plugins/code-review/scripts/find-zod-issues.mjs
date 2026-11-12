@@ -11,14 +11,14 @@
  * Exit codes: 0 ok (whatever the findings), 2 usage/config error, 3 environment error.
  */
 import path from 'node:path';
-import { runIfMain } from './lib/cli.mjs';
+import { SCOPE_HELP, runIfMain } from './lib/cli.mjs';
 import { loadZodConfig } from './lib/config.mjs';
 import { declaredPackages } from './lib/packages.mjs';
 import { repoRoot } from './lib/git.mjs';
 import { parseScanArgs, scanChanges } from './lib/ts-scan.mjs';
 import { RULES, RULE_IDS, SUPPRESSION_MARKER, detect } from './lib/zod-detect.mjs';
 
-export const TOOL_VERSION = '0.2.0';
+export const TOOL_VERSION = '0.3.0';
 
 const HELP = `Usage: find-zod-issues.mjs [options]
 
@@ -27,7 +27,7 @@ Lists Zod .parse / .parseAsync calls introduced in the working tree (vs. the mer
 
 Options:
   --base <ref>        Base branch/ref (default: origin/HEAD, then origin/main|master|develop, main|master|develop)
-  --repo <dir>        Repository directory (default: current directory)
+${SCOPE_HELP}  --repo <dir>        Repository directory (default: current directory)
   --config <file>     Config file (default: <repo>/.claude/code-review.json)
   --typescript <dir>  typescript package directory (default: auto; env CODE_REVIEW_TYPESCRIPT)
   --no-types          Do not build the type checker (faster; Zod schemas are recognised by syntax only)
