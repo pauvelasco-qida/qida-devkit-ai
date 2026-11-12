@@ -1,6 +1,6 @@
 {
   "name": "pr-review",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Pull-request reviewer agents for Qida apps: deterministic magic-string detection for TypeScript/JavaScript (inline domain values, inline query keys per ADR-FE-002, literal UI text per ADR-FE-004, hardcoded secrets) TypeScript conventions for new code (no any or classes per ADR-FE-001, no enums, named exports, import type, plus advisory style rules) and Zod validation (safeParse, never parse)",
   "author": {
     "name": "Qida",
