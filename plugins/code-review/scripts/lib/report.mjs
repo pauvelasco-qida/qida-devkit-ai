@@ -479,8 +479,9 @@ export function renderReport(key, scan, judgments) {
   const { base, head, files, typescript } = scan;
   const paths = scan.scope?.paths ?? [];
   const side = SIDE_TEXT[scan.scope?.changes ?? WORKTREE.kind](head);
+  const baseText = base.ref === NO_BASE ? 'whole files' : `\`${base.ref}\` (merge-base \`${base.mergeBase.slice(0, 7)}\`)`;
   const scope =
-    `- Scope: ${base.ref === NO_BASE ? 'whole files' : `\`${base.ref}\` (merge-base \`${base.mergeBase.slice(0, 7)}\`)`} → ${side}` +
+    `- Scope: ${baseText} → ${side}` +
     (paths.length === 0 ? '' : ` · paths ${paths.map((p) => `\`${oneLine(p)}\``).join(', ')}`) +
     ` · ${files.scanned} files scanned · ${files.skipped} skipped${typescript === null ? '' : ` · type info: ${typescript.typeInfo}`}`;
   const summary = [scope, ...(scan.warnings ?? []).map((w) => `- Note: ${oneLine(w)}`)];

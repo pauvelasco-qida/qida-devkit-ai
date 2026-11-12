@@ -45,21 +45,21 @@ Every mode sets **base ref**, **changes**, **paths** and **PR**. Unless a mode s
 
 **PR**
 1. `gh pr view <n> --json number,title,baseRefName,headRefOid,url`. If it fails, output `Could not read PR <n>: <first line of the error>` and stop. Do not fall back to another mode.
-2. `git merge-base --is-ancestor <headRefOid> HEAD`. If it fails, the PR is not checked out here: output exactly ``PR #<number> is not checked out here. Run `gh pr checkout <number>` and invoke /code-review:code-review <number> again.`` and stop. Do not check it out yourself. (Local commits on top of the PR head are allowed.) Instead of checking it out, the user can also pass the PR's branch.
+2. `git merge-base --is-ancestor <headRefOid> HEAD`. If it fails, the PR is not checked out here: output exactly ``PR #<number> is not checked out here. Run `gh pr checkout <number>` and invoke /code-review:code-review <number> again, or pass the PR's branch instead of its number.`` and stop. Do not check it out yourself. (Local commits on top of the PR head are allowed.)
 3. `git fetch --quiet origin <baseRefName>`. If it fails, output `Could not fetch origin/<baseRefName>: <first line of the error>` and stop. Base ref = `origin/<baseRefName>`. PR = `#<number> <title> — <url>`.
 
 **branch** (`<branch>` is the target as written):
 1. If `<branch>` equals the output of `git rev-parse --abbrev-ref HEAD`, it is the current branch: continue in **auto** mode, as if no target was given.
-2. Otherwise changes = `commit <branch>`: only what is committed on that branch, which need not be checked out. Run `gh pr view <name> --json number,title,baseRefName,headRefOid,url,state`, where `<name>` is `<branch>`, or for a remote branch (`refs/remotes/<remote>/<name>`) the part after `<remote>/`. If it succeeds and `state` is `OPEN`, run PR step 3 with its `baseRefName`, and PR = `#<number> <title> — <url>`. Otherwise base ref = `auto-detect`; fetch nothing. With `--comment` and PR = `none`, output exactly ``--comment needs an open pull request for branch <branch>.`` and stop.
+2. Otherwise changes = `commit <ref>`, where `<ref>` is the full ref that Target rule 4 found (`refs/heads/<branch>` or `refs/remotes/<branch>`), so a tag of the same name is never reviewed instead: only what is committed on that branch, which need not be checked out. Run `gh pr view <name> --json number,title,baseRefName,headRefOid,url,state`, where `<name>` is `<branch>`, or for a remote branch (`refs/remotes/<remote>/<name>`) the part after `<remote>/`. If it succeeds and `state` is `OPEN`: `git merge-base --is-ancestor <headRefOid> <ref>` must succeed, so the review never shows stale code under the PR's name. If it fails, output exactly ``Branch <branch> does not contain the head of PR #<number>: pull it, or pass the PR number instead.`` and stop (local commits on top of the PR head are allowed). Then run PR step 3 with its `baseRefName`, and PR = `#<number> <title> — <url>`. Otherwise base ref = `auto-detect`; fetch nothing. With `--comment` and PR = `none`, output exactly ``--comment needs an open pull request for branch <branch>.`` and stop.
 
 **directory**:
 1. `test -d <target>` must succeed. Otherwise output exactly ``Directory not found: <target>`` and stop.
 2. `git rev-parse --show-prefix` gives the current directory relative to the repo root (empty at the root). Join it with the target and normalise the result (drop `./` and trailing `/`, resolve `..`); an absolute target is made relative to the repo root. That is **`<dir>`**, or `.` for the repo root itself. If it lies outside the repo root, output exactly ``Directory is outside the repository: <target>`` and stop.
-3. Base ref = `none` (every file under the directory is reviewed whole, not only its changes), paths = `["<dir>"]`. With `--comment`, output exactly ``--comment needs a pull request: it cannot be used with a directory.`` and stop.
+3. Base ref = `none` (every file under the directory is reviewed whole, not only its changes), paths = `["<dir>"]`. When `<dir>` starts with `:` or contains `*`, `?` or `[`, git would read it as pathspec syntax: use `[":(literal)<dir>"]` instead, so only that directory is reviewed. With `--comment`, output exactly ``--comment needs a pull request: it cannot be used with a directory.`` and stop.
 
 **`--comment` checks** (when PR is not `none`), before dispatching anything. GitHub can only anchor a comment on the PR head as it was pushed, so the review must see exactly that:
-1. `git rev-parse HEAD` must equal `headRefOid`. Otherwise output exactly ``--comment needs the pushed PR head checked out: HEAD is not the head of PR #<number>. Push or pull, then run again.`` and stop.
-2. `git status --porcelain` must print nothing. Otherwise output exactly ``--comment needs a clean working tree: commit, stash or remove local changes, then run again.`` and stop.
+1. In branch mode (changes = `commit <ref>`), `git rev-parse <ref>` must equal `headRefOid`. Otherwise output exactly ``--comment needs branch <branch> at the pushed head of PR #<number>. Push or pull it, then run again.`` and stop. In every other mode, `git rev-parse HEAD` must equal `headRefOid`. Otherwise output exactly ``--comment needs the pushed PR head checked out: HEAD is not the head of PR #<number>. Push or pull, then run again.`` and stop.
+2. Only when changes = `working tree`: `git status --porcelain` must print nothing. Otherwise output exactly ``--comment needs a clean working tree: commit, stash or remove local changes, then run again.`` and stop.
 3. `gh pr view <number> --json comments --jq '.comments[].body'`. If any body contains `<!-- code-review:posted <headRefOid> -->`, this head was already reviewed on GitHub: output exactly ``PR #<number> already has a code-review comment for this head commit; nothing posted.`` and stop.
 4. `gh api --paginate repos/{owner}/{repo}/pulls/<number>/comments --jq '.[].body'`. Every body containing `<!-- code-review:posted <headRefOid> <id> -->` is a finding a previous run posted before it stopped short of its summary: note each such `<id>` as **already posted**.
 
@@ -70,7 +70,7 @@ Launch **every reviewer in the table** **in parallel, in a single message**, one
 ```
 Review the changes in the repository at <repo root>.
 Base ref: <base ref, "auto-detect" or "none">
-Changes: <changes: "working tree" or "commit <branch>">
+Changes: <changes: "working tree" or "commit <ref>">
 Paths: <the paths as a JSON array of strings, e.g. ["apps/web"], or "all">
 PR: <PR, or "none">
 Follow your instructions exactly and return only your report.

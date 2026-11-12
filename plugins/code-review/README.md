@@ -26,7 +26,7 @@ The arguments follow Anthropic's [`code-review`](https://github.com/anthropics/c
 **Target** (optional, at most one):
 - *(none)*: the current branch (committed, staged, unstaged and untracked changes), compared with the base of its open PR, otherwise `origin/HEAD`.
 - `123`, `#123` or a PR URL: that PR, compared with its base. It must be checked out here (`gh pr checkout 123`), or pass its branch instead.
-- A branch (`feat/orders`, `origin/feat/orders`): what is committed on that branch, compared with the base of its open PR, otherwise `origin/HEAD`. It need not be checked out. The current branch is the same as no target.
+- A branch (`feat/orders`, `origin/feat/orders`): what is committed on that branch, compared with the base of its open PR, otherwise `origin/HEAD`. It need not be checked out, but with an open PR it must contain the PR head (pull it first). The current branch is the same as no target.
 - A directory (`apps/web`, `./src`, `.`): **every file under it, whole**, not only what changed. Use it to audit existing code. A name that is both a branch and a directory is refused: write `./<name>` for the directory.
 
 **Options:**
@@ -67,11 +67,11 @@ With `--comment`, after printing the report, the command posts it on the pull re
 To make sure the comments point at the code GitHub shows, `--comment` needs:
 
 - a pull request: a PR number or URL, or a branch with an open PR (not a directory);
-- the pushed PR head checked out (`HEAD` = the PR head commit) and a clean working tree.
+- the pushed PR head under review: checked out (`HEAD` = the PR head commit) with a clean working tree, or, for another branch, that branch at the PR head commit.
 
 Every comment carries a hidden `<!-- code-review:posted <sha> … -->` marker. A second `--comment` run on the same head commit posts nothing once the summary is posted; push new commits to review again. If a run stopped before its summary, the next one posts only the findings not yet posted, then the summary.
 
-Known limitation: the PR base is fetched from `origin`. For a PR opened from a fork where `origin` is the fork, the base cannot be fetched; review a local branch instead (its base is then `origin/HEAD`).
+Known limitation: the PR base is fetched from `origin`. For a PR opened from a fork where `origin` is the fork, the base is the fork's copy of the base branch, which may lag behind the upstream one (its commits then show up as changes); sync the fork's base branch first. Since 0.8.0 the base cannot be chosen on the command line; the scanners still take `--base <ref>` (see [Script CLI](#script-cli)).
 
 ### The report
 

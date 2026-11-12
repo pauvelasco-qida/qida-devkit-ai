@@ -11,7 +11,7 @@
  */
 import { SCOPE_HELP, runIfMain } from './lib/cli.mjs';
 import { globToRegExp, loadTsConventionsConfig } from './lib/config.mjs';
-import { pathExistsAtCommit } from './lib/git.mjs';
+import { NO_BASE, pathExistsAtCommit } from './lib/git.mjs';
 import { detect, directoryNameIssue, exportedNames, fileNameIssue } from './lib/ts-detect.mjs';
 import { PASCAL_CASE_FACTORIES, RULES, RULE_IDS, SUPPRESSION_MARKER } from './lib/ts-rules.mjs';
 import { openRepo, parseScanArgs, scanChanges } from './lib/ts-scan.mjs';
@@ -53,8 +53,11 @@ export function run(argv) {
   const loaded = loadTsConventionsConfig(tree, opts.config, RULE_IDS);
   const factories = new Set([...PASCAL_CASE_FACTORIES, ...loaded.config.pascalCaseFactories]);
   const defaultExportRes = loaded.config.defaultExportPaths.map(globToRegExp);
+  // Whole files (--base none): every directory is absent from the empty tree, so none is looked up,
+  // and the directories above a reviewed path lie outside the review: they count as seen.
+  const wholeFiles = opts.base === NO_BASE;
   /** @type {Set<string>} */
-  const seenDirs = new Set();
+  const seenDirs = new Set(wholeFiles ? opts.paths.flatMap(ancestorDirs) : []);
 
   return scanChanges(tree, opts, loaded, {
     tool: 'find-ts-convention-issues',
@@ -70,8 +73,25 @@ export function run(argv) {
         { isTsx: rel.endsWith('.tsx'), defaultExportAllowed: defaultExportRes.some((re) => re.test(rel)), pascalCaseFactories: factories },
         checker,
       ),
-    fileItems: ({ ts, base, file, sf }) => nameItems(ts, root, base, file, sf, seenDirs),
+    fileItems: ({ ts, base, file, sf }) => nameItems(ts, root, wholeFiles ? null : base, file, sf, seenDirs),
   });
+}
+
+/** Git's pathspec magic that matches a path literally (no glob, no other magic). */
+const LITERAL_MAGIC = ':(literal)';
+
+/**
+ * The directories strictly above a plain or `:(literal)` directory pathspec (`apps/web/src` →
+ * `apps`, `apps/web`); none for any other magic (`:…`) or glob pathspec.
+ * @param {string} pathspec
+ * @returns {string[]}
+ */
+function ancestorDirs(pathspec) {
+  const literal = pathspec.startsWith(LITERAL_MAGIC);
+  const path = literal ? pathspec.slice(LITERAL_MAGIC.length) : pathspec;
+  if (!literal && (path.startsWith(':') || /[*?[]/.test(path))) return [];
+  const segments = path.replace(/^\.\/|\/+$/g, '').split('/');
+  return segments.slice(0, -1).map((_, i) => segments.slice(0, i + 1).join('/'));
 }
 
 /**
@@ -79,7 +99,7 @@ export function run(argv) {
  * and directories absent from the base (each directory once per run, through `seenDirs`).
  * @param {TS} ts
  * @param {string} root
- * @param {string} base
+ * @param {string | null} base The merge-base, or null when every directory is new (whole files).
  * @param {ChangedFile} f
  * @param {SourceFile} sf
  * @param {Set<string>} seenDirs
@@ -100,7 +120,7 @@ function nameItems(ts, root, base, f, sf, seenDirs) {
       const dir = segments.slice(0, i + 1).join('/');
       if (seenDirs.has(dir)) continue;
       seenDirs.add(dir);
-      if (pathExistsAtCommit(root, base, dir)) continue;
+      if (base !== null && pathExistsAtCommit(root, base, dir)) continue;
       const issue = directoryNameIssue(/** @type {string} */ (segments[i]));
       if (issue !== null) out.push({ file: `${dir}/`, item: nameItem('V-FILE-NAME', issue) });
     }

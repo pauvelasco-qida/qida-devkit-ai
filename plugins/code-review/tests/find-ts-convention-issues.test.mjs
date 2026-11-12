@@ -235,6 +235,30 @@ test('file and directory names: only names the PR introduces', (t) => {
   );
 });
 
+test('whole files (--base none): directory names under the reviewed path count, the ones above it do not', (t) => {
+  const fn = src(['export function helper(): number { return 1; }']);
+  const dir = makeRepo(t, { base: { 'admin-web/src/user-profile/api.ts': fn }, commitHead: false });
+  assert.deepEqual(found(run(['--repo', dir, '--base', 'none', '--path', 'admin-web/src', '--typescript', TS_DIR])), [
+    'admin-web/src/user-profile/:0 V-FILE-NAME user-profile/',
+  ]);
+  // Without a path, every directory is reviewed.
+  assert.deepEqual(found(run(['--repo', dir, '--base', 'none', '--typescript', TS_DIR])), [
+    'admin-web/:0 V-FILE-NAME admin-web/',
+    'admin-web/src/user-profile/:0 V-FILE-NAME user-profile/',
+  ]);
+});
+
+test('whole files (--base none): a :(literal) path matches only that directory, and its ancestors do not count', (t) => {
+  const fn = src(['export function helper(): number { return 1; }']);
+  const dir = makeRepo(t, {
+    base: { 'admin-web/[id]/user-profile/api.ts': fn, 'admin-web/i/other-dir/api.ts': fn },
+    commitHead: false,
+  });
+  assert.deepEqual(found(run(['--repo', dir, '--base', 'none', '--path', ':(literal)admin-web/[id]', '--typescript', TS_DIR])), [
+    'admin-web/[id]/user-profile/:0 V-FILE-NAME user-profile/',
+  ]);
+});
+
 test('review candidates: bag-of-optionals types and throws the framework does not handle', (t) => {
   const dir = makeRepo(t, {
     head: {
