@@ -201,7 +201,10 @@ const TS_VIOLATIONS = {
   }),
   'V-TYPE-NAMING': (c) => ({ why: 'Types, interfaces, classes and enums are PascalCase.', fix: `Rename to \`${str(c, 'suggestion')}\`.` }),
   'V-VALUE-NAMING': (c) => ({
-    why: 'Variables, functions and parameters are camelCase (components PascalCase, constants ALL_CAPS).',
+    why:
+      c.detail === 'Zod schema'
+        ? 'Zod schemas are PascalCase (`UserSchema`).'
+        : 'Variables, functions and parameters are camelCase (components PascalCase, constants ALL_CAPS, Zod schemas PascalCase).',
     fix: `Rename to \`${str(c, 'suggestion')}\`.`,
   }),
   'V-CONST-NAMING': (c) => ({ why: 'Literal and `as const` constants are ALL_CAPS.', fix: `Rename to \`${str(c, 'suggestion')}\`.` }),

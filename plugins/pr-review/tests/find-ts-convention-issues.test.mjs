@@ -161,6 +161,48 @@ test('components, hooks, factories and renamed bindings may be PascalCase or ski
   assert.deepEqual(r.summary.excluded, { 'E-COMPONENT': 1, 'E-HOOK': 1 });
 });
 
+test('Zod schemas are PascalCase; parsed data and other values stay camelCase', (t) => {
+  const dir = makeRepo(t, {
+    head: {
+      // `zod` is not installed here: the unresolved type falls back to syntax.
+      'src/untyped.ts': src([
+        "import { z } from 'zod';",
+        'export const UserSchema = z.object({ id: z.string() });',
+        'export const userSchema = z.object({ id: z.string() });',
+        'export const ADMIN_SCHEMA = UserSchema.extend({ admin: z.boolean() });',
+        'export const NameSchema = z.string().min(1);',
+        'export const user = UserSchema.parse({});',
+        'export const jsonSchema = z.toJSONSchema(UserSchema);',
+        'export const BadValue = Math.max(1, 2);',
+      ]),
+      // A local stand-in for `zod`: the checker sees a type with `safeParse`.
+      'src/typed.ts': src([
+        'interface ZodLike { safeParse(x: unknown): unknown; extend(s: object): ZodLike }',
+        'declare const z: { object(s: object): ZodLike };',
+        'export const BaseSchema = z.object({});',
+        'export const extendedSchema = BaseSchema.extend({});',
+        'export const result = BaseSchema.safeParse({});',
+      ]),
+    },
+  });
+  const r = scan(dir);
+  assert.deepEqual(found(r), [
+    'src/typed.ts:4 V-VALUE-NAMING extendedSchema',
+    'src/untyped.ts:3 V-VALUE-NAMING userSchema',
+    'src/untyped.ts:4 V-VALUE-NAMING ADMIN_SCHEMA',
+    'src/untyped.ts:8 V-VALUE-NAMING BadValue',
+  ]);
+  assert.deepEqual(
+    r.candidates.map((/** @type {any} */ c) => [c.detail, c.expected, c.suggestion]),
+    [
+      ['Zod schema', 'PascalCase', 'ExtendedSchema'],
+      ['Zod schema', 'PascalCase', 'UserSchema'],
+      ['Zod schema', 'PascalCase', 'AdminSchema'],
+      ['variable', 'camelCase', 'badValue'],
+    ],
+  );
+});
+
 test('file and directory names: only names the PR introduces', (t) => {
   const fn = src(['export function helper(): number { return 1; }']);
   const dir = makeRepo(t, {

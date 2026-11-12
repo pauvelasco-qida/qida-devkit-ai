@@ -240,6 +240,20 @@ test('ts-conventions: severities, fix variants, file-name location, disabled rul
   assert.match(report, /"advisory":\["TC-003","TC-004","TC-005"\],"notFlagged":\["TC-006"\]/);
 });
 
+test('ts-conventions: a Zod schema name gets its own naming reason', () => {
+  const report = renderReport(
+    'ts-conventions',
+    scan('find-ts-convention-issues', [
+      tc('TC-001', 'V-VALUE-NAMING', 'advisory', { subject: 'userSchema', detail: 'Zod schema', suggestion: 'UserSchema' }),
+      tc('TC-002', 'V-VALUE-NAMING', 'advisory', { subject: 'user_id', detail: 'variable', suggestion: 'userId' }),
+    ]),
+    new Map(),
+  );
+  assertConsistent(report);
+  assert.match(report, /- Why: Zod schemas are PascalCase \(`UserSchema`\)\.\n {2}- Fix: Rename to `UserSchema`\./);
+  assert.match(report, /- Why: Variables, functions and parameters are camelCase \(.*Zod schemas PascalCase\)\.\n {2}- Fix: Rename to `userId`\./);
+});
+
 test('ts-conventions: advisory findings alone pass, and keep the accept line', () => {
   const report = renderReport(
     'ts-conventions',

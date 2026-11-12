@@ -212,7 +212,7 @@ function hoistedVarNames(ts, scope) {
  * @param {string} spec Module specifier.
  * @returns {boolean}
  */
-function isZodModule(spec) {
+export function isZodModule(spec) {
   // `zod` itself, or a package re-exporting it whose name has a `zod` segment
   // (`@hono/zod-openapi`, `nestjs-zod`, `zod-openapi`): its `z` builds Zod schemas.
   return spec === 'zod' || spec.startsWith('zod/') || /(?:^|[@/-])zod(?:$|[/-])/.test(spec);
@@ -225,7 +225,7 @@ function isZodModule(spec) {
  * @param {SourceFile} sf
  * @returns {Map<string, string>}
  */
-function importSources(ts, sf) {
+export function importSources(ts, sf) {
   /** @type {Map<string, string>} */
   const out = new Map();
   /** @param {Node} name @param {string} spec */
@@ -287,7 +287,7 @@ function importSources(ts, sf) {
  * @param {Node} node
  * @returns {string | null}
  */
-function rootName(ts, node) {
+export function rootName(ts, node) {
   let n = node;
   for (;;) {
     if (ts.isIdentifier(n)) return n.text;

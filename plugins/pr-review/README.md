@@ -177,7 +177,7 @@ The agent judges only the two `REVIEW` kinds, with fixed decision tables (see `a
 | `V-OPTIONAL-UNDEFINED` | advisory | Required property typed `T \| undefined` | — |
 | `V-TYPE-PARAM-PREFIX` | advisory | Type parameter other than `T` / `T<Name>` | Mapped-type keys (`[K in …]`) and `infer` variables |
 | `V-TYPE-NAMING` | advisory | Type, interface, class or enum not PascalCase | — |
-| `V-VALUE-NAMING` | advisory | Variable, function, parameter or renamed binding not camelCase | PascalCase components, PascalCase results of `memo`, `forwardRef`, `lazy`, `createContext`, `styled`, TanStack Router `create*Route`…, PascalCase parameters and renamed bindings (`{ icon: Icon }`), ALL_CAPS `const` |
+| `V-VALUE-NAMING` | advisory | Variable, function, parameter or renamed binding not camelCase; a Zod schema not PascalCase (`UserSchema`) | PascalCase components, PascalCase results of `memo`, `forwardRef`, `lazy`, `createContext`, `styled`, TanStack Router `create*Route`…, PascalCase parameters and renamed bindings (`{ icon: Icon }`), ALL_CAPS `const` |
 | `V-CONST-NAMING` | advisory | Module-scope `const` holding a literal or an `as const` value, not ALL_CAPS | — |
 | `V-FILE-NAME` | advisory | New file not camelCase; PascalCase file without an export of that name; new directory not camelCase | File-router decorations: `$id`, `_layout`, `__root`, `-components`, `(group)`, `[id]` |
 | `REVIEW-DISCRIMINATED-UNION` | advisory, agent judges | Type with a required literal-union property and ≥ 2 optional properties | Agent row D2 |
@@ -252,7 +252,7 @@ This step is optional. The `zod` section of the same `.claude/pr-review.json`:
 To accept one call deliberately, put the marker on its line, or on a comment-only line just above it:
 
 ```ts
-const config = envSchema.parse(import.meta.env); // zod-ok: invalid env must stop the app at startup
+const config = EnvSchema.parse(import.meta.env); // zod-ok: invalid env must stop the app at startup
 ```
 
 ### Script CLI

@@ -11,6 +11,7 @@ import {
   toStyle,
 } from './ts-rules.mjs';
 import { rawItem } from './ts-scan.mjs';
+import { importSources, isZodModule, rootName } from './zod-detect.mjs';
 
 /** @typedef {typeof import('typescript')} TS */
 /** @typedef {import('typescript').Node} Node */
@@ -26,6 +27,30 @@ import { rawItem } from './ts-scan.mjs';
  * @property {boolean} defaultExportAllowed The file matches `defaultExportPaths`.
  * @property {ReadonlySet<string>} pascalCaseFactories
  */
+
+/** Zod calls whose result is data, not a schema: parsing, encoding, error formatting, JSON Schema. */
+const ZOD_NON_SCHEMA_CALLS = new Set([
+  'parse',
+  'parseAsync',
+  'safeParse',
+  'safeParseAsync',
+  'spa',
+  'encode',
+  'encodeAsync',
+  'decode',
+  'decodeAsync',
+  'safeEncode',
+  'safeDecode',
+  'isOptional',
+  'isNullable',
+  'toJSONSchema',
+  'prettifyError',
+  'treeifyError',
+  'flattenError',
+  'formatError',
+  'config',
+  'registry',
+]);
 
 /** @type {Readonly<Record<string, string>>} */
 const DEFAULT_DECLARATION_KIND = { FunctionDeclaration: 'function', ClassDeclaration: 'class', InterfaceDeclaration: 'interface' };
@@ -92,6 +117,33 @@ export function detect(ts, sf, ctx, checker) {
       expected,
       suggestion: toStyle(id.text, expected),
     });
+  };
+
+  const imports = importSources(ts, sf);
+
+  /**
+   * Whether a variable holds a Zod schema. With the checker: its type has `safeParse` (the Zod
+   * scanner's test). Without it, or when the type is unresolved (`any`): its initializer is a call
+   * chain rooted at a name imported from `zod` (`z.object(…)`, `z.string().min(1)`) or at a
+   * `…Schema` name (`BaseSchema.extend(…)`), and does not end in a call that returns data
+   * (`UserSchema.parse(raw)`, `z.toJSONSchema(UserSchema)`).
+   * @param {import('typescript').VariableDeclaration} decl
+   * @returns {boolean}
+   */
+  const isZodSchema = (decl) => {
+    if (decl.initializer === undefined) return false;
+    if (checker !== null) {
+      const type = checker.getNonNullableType(checker.getTypeAtLocation(decl.name));
+      if ((type.flags & ts.TypeFlags.Any) === 0) return type.getProperty('safeParse') !== undefined;
+    }
+    const e = unwrapExpression(ts, decl.initializer);
+    if (!ts.isCallExpression(e)) return false;
+    const last = ts.isPropertyAccessExpression(e.expression) ? e.expression.name.text : ts.isIdentifier(e.expression) ? e.expression.text : null;
+    if (last !== null && ZOD_NON_SCHEMA_CALLS.has(last)) return false;
+    const root = rootName(ts, e);
+    if (root === null) return false;
+    const spec = imports.get(root);
+    return (spec !== undefined && isZodModule(spec)) || /.Schema$/.test(root);
   };
 
   /** @param {Node} node */
@@ -259,7 +311,9 @@ export function detect(ts, sf, ctx, checker) {
       const moduleScope =
         ts.isVariableDeclarationList(list) && ts.isVariableStatement(list.parent) && ts.isSourceFile(list.parent.parent);
       const name = node.name.text;
-      if (moduleScope && isConst && node.initializer !== undefined && isLiteralConstant(ts, node.initializer)) {
+      if (isZodSchema(node)) {
+        if (!PASCAL_CASE.test(name) || UPPER_SNAKE.test(name)) naming('V-VALUE-NAMING', node.name, 'Zod schema', 'PascalCase');
+      } else if (moduleScope && isConst && node.initializer !== undefined && isLiteralConstant(ts, node.initializer)) {
         if (!UPPER_SNAKE.test(name)) naming('V-CONST-NAMING', node.name, 'constant', 'ALL_CAPS');
       } else if (!valueNameOk(name, isConst, () => pascalAllowed(name, node.initializer))) {
         naming('V-VALUE-NAMING', node.name, 'variable', 'camelCase');
