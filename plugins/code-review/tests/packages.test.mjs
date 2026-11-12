@@ -1,6 +1,7 @@
 // @ts-check
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { worktreeTree } from '../scripts/lib/git.mjs';
 import { declaredPackages, globToRegExp, workspaceMembers } from '../scripts/lib/packages.mjs';
 import { makeRepo } from './helpers.mjs';
 
@@ -25,7 +26,7 @@ test('workspace members apply negations and stop at package directories', (t) =>
       'apps/web/package.json': JSON.stringify({ name: 'web' }),
     },
   });
-  assert.deepEqual([...workspaceMembers(dir)].sort(), ['@qida/core', 'billing']);
+  assert.deepEqual([...workspaceMembers(worktreeTree(dir))].sort(), ['@qida/core', 'billing']);
 });
 
 test('pnpm items at column 0 are read; a package folder named build is still a member', (t) => {
@@ -36,7 +37,7 @@ test('pnpm items at column 0 are read; a package folder named build is still a m
       'tools/build/package.json': JSON.stringify({ name: '@qida/build' }),
     },
   });
-  assert.deepEqual([...workspaceMembers(dir)].sort(), ['@qida/build', '@x/a']);
+  assert.deepEqual([...workspaceMembers(worktreeTree(dir))].sort(), ['@qida/build', '@x/a']);
 });
 
 test('root, nested and brace workspace patterns', (t) => {
@@ -51,7 +52,7 @@ test('root, nested and brace workspace patterns', (t) => {
       'libs/other/package.json': JSON.stringify({ name: '@x/other' }),
     },
   });
-  assert.deepEqual([...workspaceMembers(dir)].sort(), ['@x/core', '@x/ui', '@x/web', 'pkg-a']);
+  assert.deepEqual([...workspaceMembers(worktreeTree(dir))].sort(), ['@x/core', '@x/ui', '@x/web', 'pkg-a']);
 });
 
 test('? in a workspace glob matches one character', () => {
@@ -66,7 +67,7 @@ test('a package.json with a BOM is read; an unparseable one makes the dependenci
       'apps/bad/package.json': '{ "dependencies": { "x": "1" }, }',
     },
   });
-  const lookup = declaredPackages(dir);
+  const lookup = declaredPackages(worktreeTree(dir));
   assert.equal(lookup('src/a.ts')('superjson'), '2.2.1');
   assert.equal(lookup('apps/bad/src/a.ts')('superjson'), null);
 });

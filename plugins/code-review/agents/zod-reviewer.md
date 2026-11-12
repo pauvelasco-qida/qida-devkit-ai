@@ -30,7 +30,7 @@ You review a pull request for **Zod validation that throws, introduced by it**: 
 node "${CLAUDE_PLUGIN_ROOT}/scripts/find-zod-issues.mjs" --repo "<REPO_ROOT>" --base "<BASE>" <SCOPE> --save
 ```
 
-`<REPO_ROOT>` is the repository path from your prompt; omit `--repo` when none was given (the current directory is used). Omit `--base "<BASE>"` when no base ref was given or it is "auto-detect" (the script then uses origin/HEAD, then origin/main|master|develop). `<SCOPE>` comes from your prompt: `--head '<head>'` when Changes is `commit <head>`, `--staged` when it is `staged`, nothing when it is `working tree` or not given; then one `--path '<pathspec>'` per entry of Paths, in order, and none when Paths is `all` or not given. Wrap each value in single quotes, writing a `'` inside it as `'\''`. Use a Bash timeout of 600000 ms. It prints one JSON object with `savedTo`, the full scan for step 2 (and `error` when the scan failed). Do not retry with other flags, and do not fall back to reading the diff.
+`<REPO_ROOT>` is the repository path from your prompt; omit `--repo` when none was given (the current directory is used). Omit `--base "<BASE>"` when no base ref was given or it is "auto-detect" (the script then uses origin/HEAD, then origin/main|master|develop). `<SCOPE>` is `--changes '<Changes>' --paths '<Paths>'`, each value copied from your prompt exactly as written (the script reads them; leave out an option whose line your prompt does not have). Wrap each value in single quotes, writing a `'` inside it as `'\''`. Use a Bash timeout of 600000 ms. It prints one JSON object with `savedTo`, the full scan for step 2 (and `error` when the scan failed). Do not retry with other flags, and do not fall back to reading the diff.
 
 ### 2. Write the report
 

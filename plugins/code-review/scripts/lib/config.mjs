@@ -42,30 +42,39 @@ const STRING_ARRAY_KEYS = /** @type {const} */ ([
   'logFunctions',
 ]);
 
+/** @typedef {import('./git.mjs').ReviewedTree} ReviewedTree */
+
 /**
- * Reads one top-level section of the config file.
- * @param {string} root
+ * Reads one top-level section of the config file: the one given explicitly (from disk), or else
+ * the repository's, from the reviewed side (the working tree, the index or the commit), so a
+ * review of a commit applies the rules committed with it.
+ * @param {ReviewedTree} tree
  * @param {string | null} explicitPath
  * @param {string} sectionName
  * @returns {{ section: Record<string, unknown> | undefined, path: string | null }}
  */
-function readSection(root, explicitPath, sectionName) {
-  const file = explicitPath !== null ? path.resolve(explicitPath) : path.join(root, CONFIG_RELATIVE_PATH);
-  if (!fs.existsSync(file)) {
-    if (explicitPath !== null) throw new ScannerError('CONFIG_NOT_FOUND', `Config file not found: ${file}`, 2);
-    return { section: undefined, path: null };
+function readSection(tree, explicitPath, sectionName) {
+  const file = explicitPath !== null ? path.resolve(explicitPath) : path.join(tree.root, CONFIG_RELATIVE_PATH);
+  /** @type {string | null} */
+  let text;
+  if (explicitPath !== null) {
+    if (!fs.existsSync(file)) throw new ScannerError('CONFIG_NOT_FOUND', `Config file not found: ${file}`, 2);
+    text = fs.readFileSync(file, 'utf8');
+  } else {
+    text = tree.readText(CONFIG_RELATIVE_PATH);
+    if (text === null) return { section: undefined, path: null };
   }
 
   /** @type {unknown} */
   let parsed;
   try {
-    parsed = readJson(file);
+    parsed = parseJson(text);
   } catch (e) {
     throw new ScannerError('CONFIG_INVALID', `Invalid JSON in ${file}: ${/** @type {Error} */ (e).message}`, 2);
   }
   const section =
     typeof parsed === 'object' && parsed !== null ? /** @type {Record<string, unknown>} */ (parsed)[sectionName] : undefined;
-  const relative = path.relative(root, file) || file;
+  const relative = path.relative(tree.root, file) || file;
   if (section === undefined) return { section: undefined, path: relative };
   if (typeof section !== 'object' || section === null || Array.isArray(section)) {
     throw new ScannerError('CONFIG_INVALID', `"${sectionName}" in ${relative} must be an object.`, 2);
@@ -86,11 +95,11 @@ function stringArray(value, key) {
 }
 
 /**
- * @param {string} root
+ * @param {ReviewedTree} tree
  * @param {string | null} explicitPath
  * @returns {{ config: MagicStringsConfig, path: string | null, warnings: string[] }}
  */
-export function loadConfig(root, explicitPath) {
+export function loadConfig(tree, explicitPath) {
   /** @type {string[]} */
   const warnings = [];
   /** @type {MagicStringsConfig} */
@@ -103,7 +112,7 @@ export function loadConfig(root, explicitPath) {
     i18nFunctions: [],
     logFunctions: [],
   };
-  const { section, path: relative } = readSection(root, explicitPath, 'magicStrings');
+  const { section, path: relative } = readSection(tree, explicitPath, 'magicStrings');
   if (section === undefined) return { config, path: relative, warnings };
 
   for (const [key, value] of Object.entries(section).sort(([a], [b]) => (a < b ? -1 : 1))) {
@@ -138,17 +147,17 @@ export function loadConfig(root, explicitPath) {
 const TS_STRING_ARRAY_KEYS = /** @type {const} */ (['ignorePaths', 'defaultExportPaths', 'pascalCaseFactories', 'disabledRules']);
 
 /**
- * @param {string} root
+ * @param {ReviewedTree} tree
  * @param {string | null} explicitPath
  * @param {readonly string[]} knownRules Rule ids that `disabledRules` may name.
  * @returns {{ config: TsConventionsConfig, path: string | null, warnings: string[] }}
  */
-export function loadTsConventionsConfig(root, explicitPath, knownRules) {
+export function loadTsConventionsConfig(tree, explicitPath, knownRules) {
   /** @type {string[]} */
   const warnings = [];
   /** @type {TsConventionsConfig} */
   const config = { ignorePaths: [], defaultExportPaths: [], pascalCaseFactories: [], disabledRules: [] };
-  const { section, path: relative } = readSection(root, explicitPath, 'tsConventions');
+  const { section, path: relative } = readSection(tree, explicitPath, 'tsConventions');
   if (section === undefined) return { config, path: relative, warnings };
 
   for (const [key, value] of Object.entries(section).sort(([a], [b]) => (a < b ? -1 : 1))) {
@@ -178,16 +187,16 @@ export function loadTsConventionsConfig(root, explicitPath, knownRules) {
  */
 
 /**
- * @param {string} root
+ * @param {ReviewedTree} tree
  * @param {string | null} explicitPath
  * @returns {{ config: ZodConfig, path: string | null, warnings: string[] }}
  */
-export function loadZodConfig(root, explicitPath) {
+export function loadZodConfig(tree, explicitPath) {
   /** @type {string[]} */
   const warnings = [];
   /** @type {ZodConfig} */
   const config = { ignorePaths: [] };
-  const { section, path: relative } = readSection(root, explicitPath, 'zod');
+  const { section, path: relative } = readSection(tree, explicitPath, 'zod');
   if (section === undefined) return { config, path: relative, warnings };
 
   for (const [key, value] of Object.entries(section).sort(([a], [b]) => (a < b ? -1 : 1))) {
@@ -198,13 +207,13 @@ export function loadZodConfig(root, explicitPath) {
 }
 
 /**
- * Parses a JSON file, tolerating a UTF-8 byte-order mark (editors on Windows add one). Shared by
+ * Parses JSON text, tolerating a UTF-8 byte-order mark (editors on Windows add one). Shared by
  * the config loader and the package resolution, so both read the same inputs the same way.
- * @param {string} file
+ * @param {string} text
  * @returns {any}
  */
-export function readJson(file) {
-  return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+export function parseJson(text) {
+  return JSON.parse(text.replace(/^\uFEFF/, ''));
 }
 
 /**

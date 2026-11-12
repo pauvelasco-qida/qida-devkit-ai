@@ -10,12 +10,10 @@
  *
  * Exit codes: 0 ok (whatever the findings), 2 usage/config error, 3 environment error.
  */
-import path from 'node:path';
 import { SCOPE_HELP, runIfMain } from './lib/cli.mjs';
 import { loadZodConfig } from './lib/config.mjs';
 import { declaredPackages } from './lib/packages.mjs';
-import { repoRoot } from './lib/git.mjs';
-import { parseScanArgs, scanChanges } from './lib/ts-scan.mjs';
+import { openRepo, parseScanArgs, scanChanges } from './lib/ts-scan.mjs';
 import { RULES, RULE_IDS, SUPPRESSION_MARKER, detect } from './lib/zod-detect.mjs';
 
 export const TOOL_VERSION = '0.3.0';
@@ -43,9 +41,9 @@ export function run(argv) {
   const opts = parseScanArgs(argv);
   if (opts.help) return { help: HELP };
 
-  const root = repoRoot(path.resolve(opts.repo));
-  const packagesFor = declaredPackages(root);
-  return scanChanges(root, opts, loadZodConfig(root, opts.config), {
+  const tree = openRepo(opts);
+  const packagesFor = declaredPackages(tree);
+  return scanChanges(tree, opts, loadZodConfig(tree, opts.config), {
     tool: 'find-zod-issues',
     version: TOOL_VERSION,
     idPrefix: 'ZOD',

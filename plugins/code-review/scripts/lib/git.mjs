@@ -21,6 +21,9 @@ import { ScannerError } from './errors.mjs';
 /** @type {Target} */
 export const WORKTREE = Object.freeze({ kind: 'worktree' });
 
+/** @type {Target} */
+const STAGED = Object.freeze({ kind: 'staged' });
+
 /** Read-only: never let git take optional locks (index refresh) while we inspect the repo. */
 const GIT_ENV = { ...process.env, GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' };
 
@@ -133,17 +136,14 @@ export function resolveBaseRef(root, requested) {
 }
 
 /**
- * @param {string} root
+ * @param {ReviewedTree} tree The merge-base is taken with the reviewed commit, or with HEAD.
  * @param {string} baseRef
- * @param {Target} [target] The merge-base is taken with the target commit, or with HEAD.
- * @returns {string} Merge-base commit sha between HEAD (or the target commit) and baseRef.
+ * @returns {string} Merge-base commit sha between HEAD (or the reviewed commit) and baseRef.
  */
-export function mergeBase(root, baseRef, target = WORKTREE) {
-  const head = target.kind === 'commit' ? target.sha : 'HEAD';
-  const out = tryGit(['merge-base', head, baseRef], root);
+export function mergeBase(tree, baseRef) {
+  const out = tryGit(['merge-base', tree.headRev, baseRef], tree.root);
   if (out === null) {
-    const name = target.kind === 'commit' ? target.ref : 'HEAD';
-    throw new ScannerError('NO_MERGE_BASE', `${name} and ${baseRef} share no history.`, 2);
+    throw new ScannerError('NO_MERGE_BASE', `${tree.headName} and ${baseRef} share no history.`, 2);
   }
   return out.trim();
 }
@@ -159,7 +159,7 @@ export function resolveTarget(root, opts) {
   if (opts.head !== null && opts.staged) {
     throw new ScannerError('USAGE', '--head and --staged cannot be combined.', 2, 'Pass one of them.');
   }
-  if (opts.staged) return { kind: 'staged' };
+  if (opts.staged) return STAGED;
   if (opts.head === null) return WORKTREE;
   const sha = tryGit(['rev-parse', '--verify', '--quiet', `${opts.head}^{commit}`], root);
   if (sha === null) {
@@ -169,65 +169,184 @@ export function resolveTarget(root, opts) {
 }
 
 /**
- * The `git diff` arguments that compare the merge-base with the target.
- * @param {string} base Merge-base sha.
+ * The reviewed side of the comparison: the working tree, the index or a commit. Everything that
+ * differs between the three lives here, so callers never branch on the target's kind.
+ * @typedef {object} ReviewedTree
+ * @property {string} root Repository root.
+ * @property {Target} target
+ * @property {string} headRev The commit the merge-base is taken with (HEAD, or the reviewed commit).
+ * @property {string} headName How errors name that commit.
+ * @property {() => { ref: string, sha: string, dirty: boolean }} head The `head` of a report.
+ * @property {(base: string) => string[]} diffSides `git diff` arguments comparing the merge-base with this side.
+ * @property {(pathspecs: readonly string[]) => string[]} untracked Untracked files (the working tree only).
+ * @property {{ before: string[], after: string[], prefix: string }} grep `git grep` arguments before and
+ *   after the patterns, and the prefix git puts before each matching path.
+ * @property {(paths: readonly string[]) => { texts: Map<string, string>, unreadable: string[] }} readFiles
+ * @property {(paths: readonly string[]) => (rel: string) => string | null} reader Reader of these
+ *   files' texts, each handed out once: on disk one at a time (one file in memory), from git in one call.
+ * @property {(rel: string) => string | null} readText One file's text, or null when it is missing.
+ * @property {(rel: string) => boolean} exists Whether a file or directory exists.
+ * @property {(dir: string) => string[]} subdirs Names of a directory's subdirectories (`''`: the root).
+ */
+
+/**
+ * The working tree: committed, staged, unstaged and untracked changes, read from disk.
+ * @param {string} root
+ * @returns {ReviewedTree}
+ */
+export function worktreeTree(root) {
+  /** @param {string} rel */
+  const readText = (rel) => {
+    try {
+      return fs.readFileSync(path.join(root, rel), 'utf8');
+    } catch {
+      return null;
+    }
+  };
+  /** @param {readonly string[]} paths */
+  const readFiles = (paths) => {
+    /** @type {Map<string, string>} */
+    const texts = new Map();
+    /** @type {string[]} */
+    const unreadable = [];
+    for (const p of paths) {
+      const text = readText(p);
+      if (text === null) unreadable.push(p);
+      else texts.set(p, text);
+    }
+    return { texts, unreadable };
+  };
+  return {
+    root,
+    target: WORKTREE,
+    headRev: 'HEAD',
+    headName: 'HEAD',
+    head: () => headInfo(root),
+    diffSides: (base) => [base],
+    untracked: (pathspecs) => splitZ(git(['ls-files', '--others', '--exclude-standard', '-z', '--', ...pathspecs], root)),
+    grep: { before: ['--untracked', '--exclude-standard'], after: [], prefix: '' },
+    readFiles,
+    reader: () => readText,
+    readText,
+    exists: (rel) => fs.existsSync(path.join(root, rel)),
+    subdirs: (dir) => {
+      try {
+        return fs
+          .readdirSync(path.join(root, dir), { withFileTypes: true })
+          .filter((d) => d.isDirectory())
+          .map((d) => d.name)
+          .sort();
+      } catch {
+        return [];
+      }
+    },
+  };
+}
+
+/**
+ * A side read from git objects: the index (`rev` = `''`, git's `:<path>`) or a commit (`rev` = its
+ * sha, `<sha>:<path>`). The file listing is read once, the first time it is needed.
+ * @param {string} root
+ * @param {string} rev
+ * @param {string[]} listArgs The git command that lists every file of this side, NUL-separated.
+ * @returns {Pick<ReviewedTree, 'readFiles' | 'reader' | 'readText' | 'exists' | 'subdirs'>}
+ */
+function objectSide(root, rev, listArgs) {
+  /** @type {{ files: Set<string>, children: Map<string, Set<string>> } | null} */
+  let listing = null;
+  const list = () => {
+    if (listing !== null) return listing;
+    /** @type {Map<string, Set<string>>} */
+    const children = new Map();
+    const files = new Set(splitZ(git(listArgs, root)));
+    for (const f of files) {
+      const segments = f.split('/');
+      for (let i = 1; i < segments.length; i += 1) {
+        const parent = segments.slice(0, i - 1).join('/');
+        const set = children.get(parent) ?? new Set();
+        set.add(/** @type {string} */ (segments[i - 1]));
+        children.set(parent, set);
+      }
+    }
+    listing = { files, children };
+    return listing;
+  };
+  /** @param {readonly string[]} paths */
+  const readFiles = (paths) => readObjects(root, rev, paths);
+  return {
+    readFiles,
+    reader: (paths) => {
+      const { texts } = readFiles(paths);
+      return (rel) => {
+        const text = texts.get(rel) ?? null;
+        texts.delete(rel);
+        return text;
+      };
+    },
+    readText: (rel) => readFiles([rel]).texts.get(rel) ?? null,
+    exists: (rel) => list().files.has(rel) || list().children.has(rel),
+    subdirs: (dir) => [...(list().children.get(dir) ?? [])].sort(),
+  };
+}
+
+/**
+ * The index: staged changes only.
+ * @param {string} root
+ * @returns {ReviewedTree}
+ */
+function indexTree(root) {
+  return {
+    root,
+    target: STAGED,
+    headRev: 'HEAD',
+    headName: 'HEAD',
+    head: () => headInfo(root),
+    diffSides: (base) => ['--cached', base],
+    untracked: () => [],
+    grep: { before: ['--cached'], after: [], prefix: '' },
+    ...objectSide(root, '', ['ls-files', '--cached', '-z']),
+  };
+}
+
+/**
+ * A commit, never the working tree.
+ * @param {string} root
+ * @param {Extract<Target, { kind: 'commit' }>} target
+ * @returns {ReviewedTree}
+ */
+function commitTree(root, target) {
+  return {
+    root,
+    target,
+    headRev: target.sha,
+    headName: target.ref,
+    head: () => ({ ref: target.ref, sha: target.sha, dirty: false }),
+    diffSides: (base) => [base, target.sha],
+    untracked: () => [],
+    // A revision goes after the patterns: git would read `-f` as one otherwise.
+    grep: { before: [], after: [target.sha], prefix: `${target.sha}:` },
+    ...objectSide(root, target.sha, ['ls-tree', '-r', '-z', '--name-only', target.sha]),
+  };
+}
+
+/**
+ * The reviewed side for a target.
+ * @param {string} root
  * @param {Target} target
+ * @returns {ReviewedTree}
+ */
+export function reviewedTree(root, target) {
+  if (target.kind === 'commit') return commitTree(root, target);
+  return target.kind === 'staged' ? indexTree(root) : worktreeTree(root);
+}
+
+/**
+ * NUL-separated git output as a list, without empty entries.
+ * @param {string} out
  * @returns {string[]}
  */
-function diffSides(base, target) {
-  if (target.kind === 'staged') return ['--cached', base];
-  if (target.kind === 'commit') return [base, target.sha];
-  return [base];
-}
-
-/**
- * The git object prefix that reads a path from the target (`<sha>:` for a commit, `:` for the
- * index), or null for the working tree, which is read from disk.
- * @param {Target} target
- * @returns {string | null}
- */
-function objectPrefix(target) {
-  if (target.kind === 'commit') return target.sha;
-  if (target.kind === 'staged') return '';
-  return null;
-}
-
-/**
- * Contents of several files on the target side, like `filesAtCommit`: from disk for the working
- * tree, from the index or the commit otherwise.
- * @param {string} root
- * @param {Target} target
- * @param {readonly string[]} paths Repo-relative paths.
- * @returns {{ texts: Map<string, string>, unreadable: string[] }}
- */
-export function filesAtTarget(root, target, paths) {
-  const prefix = objectPrefix(target);
-  if (prefix !== null) return filesAtCommit(root, prefix, paths);
-  /** @type {Map<string, string>} */
-  const texts = new Map();
-  /** @type {string[]} */
-  const unreadable = [];
-  for (const p of paths) {
-    try {
-      texts.set(p, fs.readFileSync(path.join(root, p), 'utf8'));
-    } catch {
-      unreadable.push(p);
-    }
-  }
-  return { texts, unreadable };
-}
-
-/**
- * Whether a file exists on the target side.
- * @param {string} root
- * @param {Target} target
- * @param {string} rel Repo-relative path.
- * @returns {boolean}
- */
-export function existsAtTarget(root, target, rel) {
-  const prefix = objectPrefix(target);
-  if (prefix === null) return fs.existsSync(path.join(root, rel));
-  return tryGit(['cat-file', '-e', `${prefix}:${rel}`], root) !== null;
+function splitZ(out) {
+  return out.split('\0').filter((p) => p !== '');
 }
 
 /**
@@ -275,16 +394,17 @@ function decodeDiffPath(raw) {
 }
 
 /**
- * Lists files changed between the merge-base and the target (by default the working tree:
- * committed, staged, unstaged and untracked), with the exact set of added line numbers for each.
- * @param {string} root
+ * Lists files changed between the merge-base and the reviewed side (the working tree: committed,
+ * staged, unstaged and untracked; the index; or a commit), with the exact set of added line
+ * numbers for each.
+ * @param {ReviewedTree} tree
  * @param {string} base Merge-base sha.
- * @param {Target} [target]
  * @param {readonly string[]} [pathspecs] Git pathspecs that limit the files (none: every file).
  * @returns {ChangedFile[]} Sorted by path.
  */
-export function changedFiles(root, base, target = WORKTREE, pathspecs = []) {
-  const sides = [...diffSides(base, target), '--', ...pathspecs];
+export function changedFiles(tree, base, pathspecs = []) {
+  const root = tree.root;
+  const sides = [...tree.diffSides(base), '--', ...pathspecs];
   /** @type {Map<string, ChangedFile>} */
   const files = new Map();
 
@@ -356,10 +476,8 @@ export function changedFiles(root, base, target = WORKTREE, pathspecs = []) {
     }
   }
 
-  // Untracked files belong to the working tree only.
-  const untracked = target.kind === 'worktree' ? git(['ls-files', '--others', '--exclude-standard', '-z', '--', ...pathspecs], root) : '';
-  for (const p of untracked.split('\0')) {
-    if (p !== '' && !files.has(p)) {
+  for (const p of tree.untracked(pathspecs)) {
+    if (!files.has(p)) {
       files.set(p, { path: p, oldPath: null, status: 'untracked', addedLines: 'all' });
     }
   }
@@ -382,27 +500,24 @@ export function fileAtCommit(root, commit, path) {
 }
 
 /**
- * Files on the target side whose content contains any of the given fixed strings: tracked and
- * untracked (non-ignored) files of the working tree, the index, or a commit. One `git grep` pass with the needles on stdin (`-f -`), so neither the needle count
- * nor their length meets a command-line limit. Exit 1 (no match) is an empty result; any other
- * failure throws GIT_GREP_FAILED, so callers can say the search did not run.
- * @param {string} root
+ * Files on the reviewed side whose content contains any of the given fixed strings: tracked and
+ * untracked (non-ignored) files of the working tree, the index, or a commit. One `git grep` pass
+ * with the needles on stdin (`-f -`), so neither the needle count nor their length meets a
+ * command-line limit. Exit 1 (no match) is an empty result; any other failure throws
+ * GIT_GREP_FAILED, so callers can say the search did not run.
+ * @param {ReviewedTree} tree
  * @param {readonly string[]} needles Fixed strings without line breaks.
  * @param {readonly string[]} pathspecs
- * @param {Target} [target]
  * @returns {string[]} Sorted repo-relative paths.
  */
-export function grepFiles(root, needles, pathspecs, target = WORKTREE) {
+export function grepFiles(tree, needles, pathspecs) {
   // git grep -f rejects a pattern with a line break (it would split) or a NUL byte (fatal).
   const patterns = needles.filter((n) => n !== '' && !/[\n\r\0]/.test(n));
   if (patterns.length === 0) return [];
-  /** @type {string[]} */
-  const where = target.kind === 'staged' ? ['--cached'] : target.kind === 'worktree' ? ['--untracked', '--exclude-standard'] : [];
-  // A revision goes after the patterns: git would read `-f` as one otherwise.
-  const revs = target.kind === 'commit' ? [target.sha] : [];
+  const { before, after, prefix } = tree.grep;
   let out;
   try {
-    out = git(['grep', '-l', '-z', '-F', ...where, '-f', '-', ...revs, '--', ...pathspecs], root, {
+    out = git(['grep', '-l', '-z', '-F', ...before, '-f', '-', ...after, '--', ...pathspecs], tree.root, {
       input: `${patterns.join('\n')}\n`,
     });
   } catch (e) {
@@ -411,9 +526,7 @@ export function grepFiles(root, needles, pathspecs, target = WORKTREE) {
     const reason = String(err.stderr ?? '').trim() || String(err.message ?? e);
     throw new ScannerError('GIT_GREP_FAILED', `git grep failed (exit ${err.status ?? '?'}): ${reason.split('\n')[0]}`, 3);
   }
-  // On a commit, git names each match `<sha>:<path>`.
-  const strip = target.kind === 'commit' ? `${target.sha}:` : '';
-  return [...new Set(out.split('\0').filter((p) => p !== '').map((p) => (p.startsWith(strip) ? p.slice(strip.length) : p)))].sort();
+  return [...new Set(splitZ(out).map((p) => (p.startsWith(prefix) ? p.slice(prefix.length) : p)))].sort();
 }
 
 /**
@@ -427,11 +540,22 @@ export function grepFiles(root, needles, pathspecs, target = WORKTREE) {
  * @returns {{ texts: Map<string, string>, unreadable: string[] }}
  */
 export function filesAtCommit(root, commit, paths) {
+  return readObjects(root, commit, paths);
+}
+
+/**
+ * Like `filesAtCommit`, for a commit or the index.
+ * @param {string} root
+ * @param {string} rev A commit, or `''` for the index (git names an index entry `:<path>`).
+ * @param {readonly string[]} paths Repo-relative paths.
+ * @returns {{ texts: Map<string, string>, unreadable: string[] }}
+ */
+function readObjects(root, rev, paths) {
   /** @type {Map<string, string>} */
   const out = new Map();
   /** @param {string} p */
   const readOne = (p) => {
-    const text = fileAtCommit(root, commit, p);
+    const text = fileAtCommit(root, rev, p);
     if (text !== null) out.set(p, text);
   };
   const done = () => ({ texts: out, unreadable: paths.filter((p) => !out.has(p)) });
@@ -441,7 +565,7 @@ export function filesAtCommit(root, commit, paths) {
   /** @type {Buffer} */
   let buf;
   try {
-    buf = gitBuffer(['cat-file', '--batch'], root, { input: wanted.map((p) => `${commit}:${p}\n`).join('') });
+    buf = gitBuffer(['cat-file', '--batch'], root, { input: wanted.map((p) => `${rev}:${p}\n`).join('') });
   } catch {
     for (const p of wanted) readOne(p);
     return done();
@@ -484,17 +608,15 @@ export function pathExistsAtCommit(root, commit, path) {
 }
 
 /**
- * Files deleted between the merge-base and the target. Code moved out of them is not new. Never
- * limited by pathspecs: code moved from outside the reviewed paths is not new either.
- * @param {string} root
+ * Files deleted between the merge-base and the reviewed side. Code moved out of them is not new.
+ * Never limited by pathspecs: code moved from outside the reviewed paths is not new either.
+ * @param {ReviewedTree} tree
  * @param {string} base Merge-base sha.
- * @param {Target} [target]
- * @param {boolean} [renames] False lists a file renamed away as deleted too (`--no-renames`).
+ * @param {{ renamedAwayCounts: boolean }} opts `renamedAwayCounts`: a file renamed away is listed
+ *   as deleted too (`--no-renames`), for when its new path may lie outside the reviewed paths.
  * @returns {string[]} Sorted repo-relative paths at the base.
  */
-export function deletedFiles(root, base, target = WORKTREE, renames = true) {
-  return git(['diff', '--name-only', '-z', renames ? '-M' : '--no-renames', '--no-ext-diff', '--diff-filter=D', ...diffSides(base, target)], root)
-    .split('\0')
-    .filter((p) => p !== '')
-    .sort();
+export function deletedFiles(tree, base, { renamedAwayCounts }) {
+  const renames = renamedAwayCounts ? '--no-renames' : '-M';
+  return splitZ(git(['diff', '--name-only', '-z', renames, '--no-ext-diff', '--diff-filter=D', ...tree.diffSides(base)], tree.root)).sort();
 }

@@ -212,11 +212,15 @@ export class TypeProber {
   }
 
   /**
+   * Whether the file has type information for this text: its project's program (built from the
+   * disk) holds the file with exactly this text. A scan of the index or a commit can differ.
    * @param {string} absFile
+   * @param {string} text
    * @returns {boolean}
    */
-  hasTypes(absFile) {
-    return this.projectFor(absFile) !== null;
+  seesText(absFile, text) {
+    const project = this.projectFor(absFile);
+    return project !== null && project.program.getSourceFile(absFile)?.text === text;
   }
 
   /**

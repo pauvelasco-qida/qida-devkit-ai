@@ -55,6 +55,7 @@ If the arguments cannot be read this way (an unknown option, an unknown reviewer
 1. `git rev-parse HEAD` must equal `headRefOid`. Otherwise output exactly ``--comment needs the pushed PR head checked out: HEAD is not the head of PR #<number>. Push or pull, then run again.`` and stop.
 2. `git status --porcelain` must print nothing. Otherwise output exactly ``--comment needs a clean working tree: commit, stash or remove local changes, then run again.`` and stop.
 3. `gh pr view <number> --json comments --jq '.comments[].body'`. If any body contains `<!-- code-review:posted <headRefOid> -->`, this head was already reviewed on GitHub: output exactly ``PR #<number> already has a code-review comment for this head commit; nothing posted.`` and stop.
+4. `gh api --paginate repos/{owner}/{repo}/pulls/<number>/comments --jq '.[].body'`. Every body containing `<!-- code-review:posted <headRefOid> <id> -->` is a finding a previous run posted before it stopped short of its summary: note each such `<id>` as **already posted**.
 
 **base ref**, **range** and **commit**: PR = `none`. Do not validate or fetch any ref; a missing one is reported by the reviewers as `BASE_NOT_FOUND` or `HEAD_NOT_FOUND`.
 
@@ -204,7 +205,7 @@ Post only what Step 3 printed; never add, reword or drop a finding. Use `gh` for
    EOF
    ```
 
-   `<body>` is the item text with its leading `- ` removed and its sub-items unindented, as a JSON string, preceded by `**Blocking** · ` or `**Advisory** · `. Post one comment per finding id, never two. If a call fails (for example the line is not part of the PR diff), do not retry it: keep the finding for the summary.
+   `<body>` is the item text with its leading `- ` removed and its sub-items unindented, preceded by `**Blocking** · ` or `**Advisory** · ` and followed by a blank line and `<!-- code-review:posted <headRefOid> <id> -->` (`<id>` the finding id), as a JSON string. Post one comment per finding id, never two, and skip every id noted as already posted in check 4. If a call fails (for example the line is not part of the PR diff), do not retry it: keep the finding for the summary.
 2. **One summary comment**, posted last:
 
    ```
@@ -214,6 +215,6 @@ Post only what Step 3 printed; never add, reword or drop a finding. Use `gh` for
    ```
 
    `<summary>` is, in this order: the report's first line made a `##` heading (`## Code review — FAIL (2 blocking)`); the scope line; the reviewer lines; when some inline comments failed, a `### Not anchored (<n>)` section holding those items as printed in the report; when no finding was reported at all, the line `No issues found. Checked: <keys of the reviewers that ran, joined with ", ">.`; and last the line `<!-- code-review:posted <headRefOid> -->`.
-3. Output one line after the report: ``Posted on PR #<number>: <i> inline comments, 1 summary comment.``, adding ``, <n> not anchored (in the summary)`` when some inline comments failed. If the summary comment itself fails, output ``Could not post the summary on PR #<number>: <first line of the error>`` instead.
+3. Output one line after the report: ``Posted on PR #<number>: <i> inline comments, 1 summary comment.``, adding ``, <n> not anchored (in the summary)`` when some inline comments failed and ``, <k> already posted`` when check 4 found some. If the summary comment itself fails, output ``Could not post the summary on PR #<number>: <first line of the error>`` instead.
 
 Do not fix code or commit anything. If the user then asks for fixes, treat that as a new request.

@@ -25,19 +25,19 @@ import {
 import { SCOPE_HELP, runIfMain, sortBy } from './lib/cli.mjs';
 import { isScannedExtension, loadConfig, skipReason } from './lib/config.mjs';
 import { ScannerError } from './lib/errors.mjs';
-import { filesAtTarget, grepFiles, repoRoot } from './lib/git.mjs';
+import { grepFiles } from './lib/git.mjs';
 import { PLACEHOLDER } from './lib/rules.mjs';
 import {
   deletedSources,
   filePositions,
   suppressionChecker,
   tallyBy,
+  openRepo,
   openScan,
   openSources,
   parseScanArgs,
-  targetReader,
-  unreadWarning,
-  unreadableWarning,
+  readWarnings,
+  scannedTexts,
   sourceLines,
 } from './lib/ts-scan.mjs';
 import { holdsSecretText, redactRecords, snippetMasker } from './lib/redact.mjs';
@@ -168,9 +168,10 @@ export function run(argv) {
   const opts = parseScanArgs(argv, { maxProbes: DEFAULT_MAX_PROBES });
   if (opts.help) return { help: HELP };
 
-  const root = repoRoot(path.resolve(opts.repo));
-  const { config, path: configPath, warnings } = loadConfig(root, opts.config);
-  const { base, target, moves, scanned, header, files } = openScan(root, opts, config, isScannedExtension);
+  const tree = openRepo(opts);
+  const root = tree.root;
+  const { config, path: configPath, warnings } = loadConfig(tree, opts.config);
+  const { base, moves, scanned, header, files } = openScan(tree, opts, config, isScannedExtension);
 
   /** @type {Record<string, number>} */
   const excludedCounts = {};
@@ -208,18 +209,10 @@ export function run(argv) {
   const work = [];
   /** @type {Map<string, SourceFile>} */
   const headFiles = new Map();
-  const read = targetReader(root, target, scanned);
-  /** @type {string[]} */
-  const unread = [];
+  const { entries, unread } = scannedTexts(tree, scanned);
 
-  for (const f of scanned) {
-    const abs = path.join(root, f.path);
-    const text = read(f.path);
-    if (text === null) {
-      unread.push(f.path);
-      continue;
-    }
-    const sf = parse(abs, text);
+  for (const { file: f, text } of entries) {
+    const sf = parse(path.join(root, f.path), text);
     headFiles.set(f.path, sf);
     const lits = collectLiterals(ts, sf);
     tally(lits, 1);
@@ -272,9 +265,9 @@ export function run(argv) {
   }
 
   // Literals moved out of deleted files are not introduced either (read only when something can move).
-  const deleted = work.length > 0 ? deletedSources(root, base, config, isScannedExtension, moves) : { sources: [], unreadable: [] };
+  const deleted = work.length > 0 ? deletedSources(tree, base, config, isScannedExtension, moves) : { sources: [], unreadable: [] };
   for (const d of deleted.sources) tally(collectLiterals(ts, parse(d.path, d.text)), -1);
-  const baseWarnings = [...unreadWarning(unread), ...unreadableWarning([...unreadable, ...deleted.unreadable])];
+  const baseWarnings = readWarnings(unread, [...unreadable, ...deleted.unreadable]);
   baseWarnings.unshift(...allowWarnings);
 
   // Step 1 — per-literal rules, fixed order, first match wins. A known credential format comes
@@ -325,11 +318,12 @@ export function run(argv) {
   if (prober !== null) {
     for (const f of scanned) {
       const abs = path.join(root, f.path);
-      if (!prober.hasTypes(abs)) continue;
+      const sf = headFiles.get(f.path);
+      // The type checker reads the files on disk: it counts only when it sees the reviewed text.
+      if (sf === undefined || !prober.seesText(abs, sf.text)) continue;
       filesWithTypes += 1;
       const pending = work.filter((w) => w.file === f.path && w.verdict === 'PENDING');
-      const sf = headFiles.get(f.path);
-      if (pending.length === 0 || sf === undefined) continue;
+      if (pending.length === 0) continue;
       const typed = prober.probeFile(
         abs,
         pending.map((w) => w.lit),
@@ -363,7 +357,7 @@ export function run(argv) {
     /** @type {string[]} */
     let matches = [];
     try {
-      matches = grepFiles(root, needles, SOURCE_PATHSPECS, target);
+      matches = grepFiles(tree, needles, SOURCE_PATHSPECS);
     } catch (e) {
       if (!(e instanceof ScannerError)) throw e;
       // Keep the report, but say that existing constants in other files were not searched.
@@ -378,7 +372,7 @@ export function run(argv) {
     /** @type {Map<string, { name: string, file: string, line: number }[]>} */
     const defs = new Map();
     // Other files holding a value are read on the reviewed side too (disk, index or commit).
-    const others = filesAtTarget(root, target, sortBy([...files].filter((p) => !headFiles.has(p)), (x) => x)).texts;
+    const others = tree.readFiles(sortBy([...files].filter((p) => !headFiles.has(p)), (x) => x)).texts;
     for (const p of sortBy([...files], (x) => x)) {
       let sf = headFiles.get(p);
       if (sf === undefined) {

@@ -11,11 +11,13 @@
  */
 
 import { CONFIG_RELATIVE_PATH } from './config.mjs';
+import { WORKTREE } from './git.mjs';
 
 /** The config file as cited in report texts. */
 const CONFIG_REF = `\`${CONFIG_RELATIVE_PATH}\``;
 
 /** @typedef {'blocking' | 'advisory' | 'notFlagged'} Section */
+/** @typedef {import('./git.mjs').Target} Target */
 
 /**
  * The scanner fields a report reads. Candidates keep every other field of the scanner.
@@ -40,7 +42,7 @@ const CONFIG_REF = `\`${CONFIG_RELATIVE_PATH}\``;
  * @property {{ code: string, message: string, hint: string | null }} [error]
  * @property {{ ref: string, mergeBase: string }} base
  * @property {{ ref: string, dirty: boolean }} head
- * @property {{ changes: 'worktree' | 'staged' | 'commit', paths: string[] }} [scope] Absent in older scans: the working tree, every path.
+ * @property {{ changes: Target['kind'], paths: string[] }} [scope] Absent in older scans: the working tree, every path.
  * @property {{ typeInfo: string } | null} typescript
  * @property {{ disabledRules?: string[] }} [config]
  * @property {{ scanned: number, skipped: number }} files
@@ -437,6 +439,16 @@ function notRun(spec, error) {
 }
 
 /**
+ * How the Scope line names the reviewed side, per kind of target.
+ * @type {Readonly<Record<Target['kind'], (head: { ref: string, dirty: boolean }) => string>>}
+ */
+const SIDE_TEXT = Object.freeze({
+  worktree: (head) => `\`${head.ref}\`${head.dirty ? ' + uncommitted changes' : ''}`,
+  staged: () => 'staged changes',
+  commit: (head) => `commit \`${head.ref}\``,
+});
+
+/**
  * Renders a reviewer's report.
  * @param {keyof typeof REVIEWERS} key
  * @param {Scan} scan The scanner's JSON.
@@ -465,12 +477,8 @@ export function renderReport(key, scan, judgments) {
   const verdict = nBlocking > 0 ? `FAIL (${nBlocking} blocking)` : nAdvisory > 0 ? `PASS (${nAdvisory} advisory)` : 'PASS';
 
   const { base, head, files, typescript } = scan;
-  const changes = scan.scope?.changes ?? 'worktree';
   const paths = scan.scope?.paths ?? [];
-  const side =
-    changes === 'staged'
-      ? 'staged changes'
-      : `\`${head.ref}\`${changes === 'worktree' && head.dirty ? ' + uncommitted changes' : ''}`;
+  const side = SIDE_TEXT[scan.scope?.changes ?? WORKTREE.kind](head);
   const scope =
     `- Scope: \`${base.ref}\` (merge-base \`${base.mergeBase.slice(0, 7)}\`) → ${side}` +
     (paths.length === 0 ? '' : ` · paths ${paths.map((p) => `\`${oneLine(p)}\``).join(', ')}`) +

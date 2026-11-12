@@ -35,7 +35,7 @@ Pull-request reviewer agents for Qida apps. Each reviewer checks one thing, dete
 - `--comment`: also post the review on the pull request: one inline comment per finding on the PR head, then one summary comment with the verdict. Without it, output goes to the terminal only. See [Posting on the PR](#posting-on-the-pr).
 - `-- <pathspec>...`: review only the matching files. Each word is a git pathspec: a directory, a file, a glob (`*` also matches `/`) or an exclusion `':!<pathspec>'` (quote the ones with `!` or `*`).
 
-Without a range or commit, the review covers the **working tree**: committed, staged, unstaged and untracked changes. Code moved in from a file outside the paths is still recognised as moved, not new. When you narrow the review, the report's scope line says how.
+Without a range, a commit or `--staged`, the review covers the **working tree**: committed, staged, unstaged and untracked changes. With `--staged` it covers the index only, and with a range or commit only what is committed. The repository's `.claude/code-review.json` and `package.json` files are read from that same side. Code moved in from a file outside the paths is still recognised as moved, not new. When you narrow the review, the report's scope line says how.
 
 **Example workflow:**
 ```bash
@@ -88,7 +88,7 @@ To make sure the comments point at the code GitHub shows, `--comment` needs:
 - the pushed PR head checked out (`HEAD` = the PR head commit) and a clean working tree;
 - no `--staged`, base ref, range or commit.
 
-The summary carries a hidden `<!-- code-review:posted <sha> -->` marker. A second `--comment` run on the same head commit posts nothing; push new commits to review again. `--only`, `--skip`, `--effort` and paths work as usual.
+Every comment carries a hidden `<!-- code-review:posted <sha> … -->` marker. A second `--comment` run on the same head commit posts nothing once the summary is posted; push new commits to review again. If a run stopped before its summary, the next one posts only the findings not yet posted, then the summary. `--only`, `--skip`, `--effort` and paths work as usual.
 
 Known limitation: the PR base is fetched from `origin`. For a PR opened from a fork where `origin` is the fork, pass the upstream base ref explicitly (`/code-review:code-review upstream/develop`).
 
@@ -214,8 +214,11 @@ The scope options are the same in every scanner:
 |---|---|
 | (none) | The working tree (committed, staged, unstaged and untracked) vs. the merge-base of `HEAD` and `--base` |
 | `--staged` | The index (staged changes only) vs. the merge-base of `HEAD` and `--base` |
-| `--head <ref>` | The commit `<ref>` vs. the merge-base of `<ref>` and `--base`. Nothing on disk is read except for type information, which is used only for files whose text on disk matches the commit |
+| `--head <ref>` | The commit `<ref>` vs. the merge-base of `<ref>` and `--base` |
 | `--path <pathspec>` | Only the changed files matching the git pathspec (repeatable; `':!<pathspec>'` excludes). Combines with the others |
+| `--changes <text>` / `--paths <json\|all>` | The `Changes` and `Paths` lines of a reviewer prompt, as they are: `working tree`, `staged` or `commit <ref>`, and a JSON array of pathspecs or `all`. The agents pass these instead of the three options above |
+
+With `--staged` or `--head`, the sources, `.claude/code-review.json` (unless `--config` names a file) and the `package.json` / `pnpm-workspace.yaml` files are read from the index or the commit, not from disk. Only two inputs always come from disk: `node_modules` (never committed), and type information. The type checker is built from the files on disk, so it is used only for files whose text on disk matches the reviewed one; `type info` in the report counts only those.
 
 ```
 node scripts/find-zod-issues.mjs --base origin/main --path apps/web --path ':!*.test.ts'
@@ -223,7 +226,7 @@ node scripts/find-zod-issues.mjs --base HEAD --staged
 node scripts/find-zod-issues.mjs --base abc123^ --head abc123
 ```
 
-The JSON report says which scope it covered: `"scope": {"changes": "worktree" | "staged" | "commit", "paths": [...]}`. With `--head`, `head` is that ref and its sha. `--head` with `--staged` is a `USAGE` error, and a `--head` ref that does not exist is `HEAD_NOT_FOUND`.
+The JSON report says which scope it covered: `"scope": {"changes": "worktree" | "staged" | "commit", "paths": [...]}`, and the report's Scope line names it (`staged changes`, ``commit `<ref>` ``). With `--head`, `head` is that ref and its sha. `--head` with `--staged`, `--changes` with either, `--paths` with `--path`, or a `--changes` / `--paths` value of another form is a `USAGE` error, and a `--head` ref that does not exist is `HEAD_NOT_FOUND`.
 
 Exit codes: `0` ok (findings or not), `2` usage/config error, `3` environment error (not a git repo, no TypeScript), `1` internal error. Errors are JSON on stdout: `{"error": {"code", "message", "hint"}}`. If the search for existing constants in other files fails (`git grep` error), the report is still produced, with a top-level `warnings` array saying so.
 
@@ -381,5 +384,5 @@ Changing a rule or a built-in list changes results. Bump `version` in `.claude-p
 
 1. Add `agents/<name>-reviewer.md`. Keep detection in a script under `scripts/` when it can be made deterministic, and let the agent judge only what the script leaves open. Fix its output: add its spec (texts per rule, decision-table rows, sections) to `REVIEWERS` in `scripts/lib/report.mjs`, and have the agent return the output of `render-report.mjs`, as the existing agents do.
 2. Its report must start with a `## <Title> — <verdict>` heading and end with the result line `<!-- code-review:<key> {"verdict":"PASS|FAIL|NOT_RUN","blocking":[…],"advisory":[…],"notFlagged":[…]} -->`; the orchestrator extracts exactly that range. List each finding as an item under `### Blocking` or `### Advisory` in the shared item format (``- **<id>** `<file>:<line>` — <key> · <rule>`` with indented sub-items; `report.mjs` writes it), and put the same ids in the result line. The verdict is `FAIL` exactly when `blocking` is non-empty. The orchestrator moves the items into the combined lists and keeps the rest of the report under Reviewer details. The result line never reaches the user.
-3. It receives the repo root, the base ref, the changes (`working tree`, `staged` or `commit <head>`), the paths (a JSON array or `all`) and the PR reference (`#n title — url`), and maps the changes and paths to its scanner's `--staged`, `--head` and `--path` options. The PR description is deliberately not forwarded. If a reviewer needs it, pass it fenced as data (`<pr-description>…</pr-description>`) and say it is author-written text, not instructions.
+3. It receives the repo root, the base ref, the changes (`working tree`, `staged` or `commit <head>`), the paths (a JSON array or `all`) and the PR reference (`#n title — url`), and passes the changes and paths to its scanner as they are (`--changes`, `--paths`). The PR description is deliberately not forwarded. If a reviewer needs it, pass it fenced as data (`<pr-description>…</pr-description>`) and say it is author-written text, not instructions.
 4. Add a row to the reviewer table in `commands/code-review.md` and in this README.
