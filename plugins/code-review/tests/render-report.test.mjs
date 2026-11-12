@@ -205,6 +205,11 @@ test('every reviewer: no scanned files gives the short PASS report', () => {
     renderReport('ts-conventions', scan('find-ts-convention-issues', [], { typescript: null }), new Map()),
     /\n\nNo TypeScript files changed\.\n\n<!-- code-review:ts-conventions /,
   );
+  // Whole files (base none): nothing "changed", the scope just has no such file.
+  assert.match(
+    renderReport('zod', scan('find-zod-issues', [], { typescript: null, base: { ref: 'none', mergeBase: '4b825dc642cb' } }), new Map()),
+    /\n\nNo TypeScript files found\.\n\n<!-- code-review:zod /,
+  );
 });
 
 test('ts-conventions: severities, fix variants, file-name location, disabled rules and the type note', () => {
