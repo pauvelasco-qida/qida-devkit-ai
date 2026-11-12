@@ -2,6 +2,7 @@
 allowed-tools: ["Bash(git rev-parse:*)", "Bash(git merge-base:*)", "Bash(git fetch:*)", "Bash(git status:*)", "Bash(gh pr view:*)", "Bash(gh pr comment:*)", "Bash(gh api:*)", "Agent"]
 description: Run the code-review reviewers on the current branch, a PR, a base ref, a commit or range, or the staged changes, optionally limited to some paths or reviewers; print one combined report and, with --comment, post it on the PR
 disable-model-invocation: true
+argument-hint: "[PR | base ref | A..B | <commit>^!] [--staged] [--only <keys> | --skip <keys>] [--effort <level>] [--comment] [-- <pathspec>...]"
 ---
 
 # Code review
