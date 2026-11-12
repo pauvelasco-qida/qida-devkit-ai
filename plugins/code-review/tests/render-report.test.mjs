@@ -376,3 +376,12 @@ test('CLI: a scanner with --save feeds render-report end to end', (t) => {
   assert.equal(usage.status, 2);
   assert.match(usage.stderr, /--reviewer must be one of magic-strings, ts-conventions, zod\./);
 });
+
+test('a whole-files scan (--base none) names no base or merge-base in its Scope line', () => {
+  const report = renderReport(
+    'zod',
+    scan('find-zod-issues', [], { base: { ref: 'none', mergeBase: '4b825dc642cb' }, scope: { changes: 'worktree', paths: ['apps/web'] } }),
+    new Map(),
+  );
+  assert.ok(report.startsWith('## Zod validation — PASS\n\n- Scope: whole files → `feat/orders` · paths `apps/web` · 3 files scanned · 1 skipped · type info: full\n'), report);
+});

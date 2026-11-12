@@ -16,7 +16,7 @@ import { declaredPackages } from './lib/packages.mjs';
 import { openRepo, parseScanArgs, scanChanges } from './lib/ts-scan.mjs';
 import { RULES, RULE_IDS, SUPPRESSION_MARKER, detect } from './lib/zod-detect.mjs';
 
-export const TOOL_VERSION = '0.3.0';
+export const TOOL_VERSION = '0.3.1';
 
 const HELP = `Usage: find-zod-issues.mjs [options]
 
@@ -24,7 +24,8 @@ Lists Zod .parse / .parseAsync calls introduced in the working tree (vs. the mer
 --base), which must be safeParse / safeParseAsync. Prints JSON on stdout.
 
 Options:
-  --base <ref>        Base branch/ref (default: origin/HEAD, then origin/main|master|develop, main|master|develop)
+  --base <ref>        Base branch/ref (default: origin/HEAD, then origin/main|master|develop, main|master|develop);
+                      "none" reviews the matching files whole (every line counts as added)
 ${SCOPE_HELP}  --repo <dir>        Repository directory (default: current directory)
   --config <file>     Config file (default: <repo>/.claude/code-review.json)
   --typescript <dir>  typescript package directory (default: auto; env CODE_REVIEW_TYPESCRIPT)

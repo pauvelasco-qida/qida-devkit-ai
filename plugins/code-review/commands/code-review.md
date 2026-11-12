@@ -1,13 +1,13 @@
 ---
-allowed-tools: ["Bash(git rev-parse:*)", "Bash(git merge-base:*)", "Bash(git fetch:*)", "Bash(git status:*)", "Bash(gh pr view:*)", "Bash(gh pr comment:*)", "Bash(gh api:*)", "Agent"]
-description: Run the code-review reviewers on the current branch, a PR, a base ref, a commit or range, or the staged changes, optionally limited to some paths or reviewers; print one combined report and, with --comment, post it on the PR
+allowed-tools: ["Bash(git rev-parse:*)", "Bash(git merge-base:*)", "Bash(git fetch:*)", "Bash(git status:*)", "Bash(test -d:*)", "Bash(gh pr view:*)", "Bash(gh pr comment:*)", "Bash(gh api:*)", "Agent"]
+description: Run the code-review reviewers on the current branch, a PR, another branch or a whole directory; print one combined report and, with --comment, post it on the PR
 disable-model-invocation: true
-argument-hint: "[PR | base ref | A..B | <commit>^!] [--staged] [--only <keys> | --skip <keys>] [--effort <level>] [--comment] [-- <pathspec>...]"
+argument-hint: "[PR | branch | directory] [--comment]"
 ---
 
 # Code review
 
-Run the reviewer agents of the `code-review` plugin (all of them, or those the user picks) against one diff and print one combined report, and with `--comment` post it on the pull request. This command only fixes the scope, dispatches the reviewers, merges their reports and, when asked, posts them. Each reviewer owns its analysis and its findings.
+Run every reviewer agent of the `code-review` plugin against one scope and print one combined report, and with `--comment` post it on the pull request. This command only fixes the scope, dispatches the reviewers, merges their reports and, when asked, posts them. Each reviewer owns its analysis and its findings.
 
 ## Execute immediately
 
@@ -25,50 +25,53 @@ Start Step 1 as soon as the command is invoked. Do not summarise this command, a
 
 ### 1. Fix the scope
 
-Reviewers compare **the changes** with the merge-base of `HEAD` (or of the reviewed commit) and a **base ref**, optionally limited to some **paths**. Read the arguments the user gave (`$ARGUMENTS`, possibly empty) and settle each value below. Every option is optional and may appear in any order.
+Reviewers compare **the changes** with a **base ref** (through their merge-base), optionally limited to some **paths**. A base ref of `none` makes them review the files whole. Read the arguments the user gave (`$ARGUMENTS`, possibly empty) and settle each value below.
 
 `git rev-parse --show-toplevel` gives the **repo root**. If it fails, output `Not inside a git repository.` and stop.
 
-**Target** (at most one; whatever is not an option below):
-- A PR number (`123`, `#123`) or PR URL → **PR** mode.
-- A range `A..B` or `A...B` → base ref = `A`, changes = `commit B`. An empty side means `HEAD`.
-- A single commit `X^!` → base ref = `X^`, changes = `commit X`.
-- Any other word → base ref, used exactly as given.
-- Nothing → **auto** mode, or base ref = `HEAD` when `--staged` is provided.
+The arguments are at most one **target** and the option `--comment`, in any order. Anything else (a second target, any other option, such as `--staged`, `--only`, `--skip`, `--effort` or `--`) cannot be read: output one line naming the problem, followed by `Usage: /code-review:code-review [PR | branch | directory] [--comment]`, and stop. Do not guess what the user meant.
 
-**Options:**
-- `--staged`: changes = `staged` (the index only). If `--staged` argument is NOT provided and the target is not a range or commit, changes = `working tree` (committed, uncommitted and untracked changes).
-- `--only <keys>` / `--skip <keys>`: comma-separated keys from the Reviewers table. Run only the listed reviewers, or all but the listed ones; subset = yes. If neither argument is provided, run every reviewer; subset = no.
-- `--effort <level>`: one of `low`, `medium`, `high`, `xhigh`, `max`. If it is NOT provided, effort = `default`.
-- `--comment`: after printing the report, post it on the pull request (Step 4). If `--comment` argument is NOT provided, nothing is posted. It needs a pull request: a PR target, or **auto** mode that finds an open PR.
-- `-- <pathspec>...`: everything after a standalone `--` is a list of git pathspecs (`apps/web`, `':!*.test.ts'`), used exactly as given with their quotes removed. If `--` is NOT provided, paths = `all`.
+`--comment`: after printing the report, post it on the pull request (Step 4). If `--comment` is NOT provided, nothing is posted. It needs a pull request: a PR target, a branch with an open PR, or **auto** mode that finds an open PR.
 
-If the arguments cannot be read this way (an unknown option, an unknown reviewer key, an invalid effort, `--only` with `--skip`, `--staged` with a range or commit, `--comment` with `--staged`, a base ref, a range or a commit, `--skip` that leaves no reviewer, or `--` with nothing after it), output one line naming the problem, followed by `Usage: /code-review:code-review [PR | base ref | A..B | <commit>^!] [--staged] [--only <keys> | --skip <keys>] [--effort <level>] [--comment] [-- <pathspec>...]`, and stop. Do not guess what the user meant.
+**Target.** Resolve it with the first rule that applies:
+1. Nothing → **auto** mode.
+2. A PR number (`123`, `#123`) or a PR URL → **PR** mode.
+3. `.`, or a word starting with `./`, `../` or `/`, or ending with `/` → **directory** mode.
+4. Otherwise run `test -d <target>` and `git rev-parse --verify --quiet refs/heads/<target>`, and when that fails `git rev-parse --verify --quiet refs/remotes/<target>`. If both say it exists, output exactly ``<target> is both a branch and a directory: write ./<target> for the directory.`` and stop. If only the branch exists → **branch** mode; if only the directory → **directory** mode. If neither, output `Not a pull request, branch or directory: <target>` followed by the usage line, and stop.
+
+Every mode sets **base ref**, **changes**, **paths** and **PR**. Unless a mode says otherwise, changes = `working tree` (committed, uncommitted and untracked changes), paths = `all` and PR = `none`.
+
+**auto**: `gh pr view --json number,title,baseRefName,headRefOid,url,state`. If it succeeds and `state` is `OPEN`, run PR step 3 with its `baseRefName`, and PR = `#<number> <title> — <url>`. Otherwise base ref = `auto-detect`; fetch nothing. With `--comment` and PR = `none`, output exactly ``--comment needs an open pull request for this branch, or a PR number.`` and stop.
 
 **PR**
 1. `gh pr view <n> --json number,title,baseRefName,headRefOid,url`. If it fails, output `Could not read PR <n>: <first line of the error>` and stop. Do not fall back to another mode.
-2. `git merge-base --is-ancestor <headRefOid> HEAD`. If it fails, the PR is not checked out here: output exactly ``PR #<number> is not checked out here. Run `gh pr checkout <number>` and invoke /code-review:code-review <number> again.`` and stop. Do not check it out yourself. (Local commits on top of the PR head are allowed.)
+2. `git merge-base --is-ancestor <headRefOid> HEAD`. If it fails, the PR is not checked out here: output exactly ``PR #<number> is not checked out here. Run `gh pr checkout <number>` and invoke /code-review:code-review <number> again.`` and stop. Do not check it out yourself. (Local commits on top of the PR head are allowed.) Instead of checking it out, the user can also pass the PR's branch.
 3. `git fetch --quiet origin <baseRefName>`. If it fails, output `Could not fetch origin/<baseRefName>: <first line of the error>` and stop. Base ref = `origin/<baseRefName>`. PR = `#<number> <title> — <url>`.
 
-**auto**: `gh pr view --json number,title,baseRefName,headRefOid,url,state`. If it succeeds and `state` is `OPEN`, run PR step 3 with its `baseRefName`, and PR = `#<number> <title> — <url>`. Otherwise base ref = `auto-detect` and PR = `none`; fetch nothing. With `--comment` and PR = `none`, output exactly ``--comment needs an open pull request for this branch, or a PR number.`` and stop.
+**branch** (`<branch>` is the target as written):
+1. If `<branch>` equals the output of `git rev-parse --abbrev-ref HEAD`, it is the current branch: continue in **auto** mode, as if no target was given.
+2. Otherwise changes = `commit <branch>`: only what is committed on that branch, which need not be checked out. Run `gh pr view <name> --json number,title,baseRefName,headRefOid,url,state`, where `<name>` is `<branch>`, or for a remote branch (`refs/remotes/<remote>/<name>`) the part after `<remote>/`. If it succeeds and `state` is `OPEN`, run PR step 3 with its `baseRefName`, and PR = `#<number> <title> — <url>`. Otherwise base ref = `auto-detect`; fetch nothing. With `--comment` and PR = `none`, output exactly ``--comment needs an open pull request for branch <branch>.`` and stop.
 
-**`--comment` checks** (PR mode, or auto with an open PR), before dispatching anything. GitHub can only anchor a comment on the PR head as it was pushed, so the review must see exactly that:
+**directory**:
+1. `test -d <target>` must succeed. Otherwise output exactly ``Directory not found: <target>`` and stop.
+2. `git rev-parse --show-prefix` gives the current directory relative to the repo root (empty at the root). Join it with the target and normalise the result (drop `./` and trailing `/`, resolve `..`); an absolute target is made relative to the repo root. That is **`<dir>`**, or `.` for the repo root itself. If it lies outside the repo root, output exactly ``Directory is outside the repository: <target>`` and stop.
+3. Base ref = `none` (every file under the directory is reviewed whole, not only its changes), paths = `["<dir>"]`. With `--comment`, output exactly ``--comment needs a pull request: it cannot be used with a directory.`` and stop.
+
+**`--comment` checks** (when PR is not `none`), before dispatching anything. GitHub can only anchor a comment on the PR head as it was pushed, so the review must see exactly that:
 1. `git rev-parse HEAD` must equal `headRefOid`. Otherwise output exactly ``--comment needs the pushed PR head checked out: HEAD is not the head of PR #<number>. Push or pull, then run again.`` and stop.
 2. `git status --porcelain` must print nothing. Otherwise output exactly ``--comment needs a clean working tree: commit, stash or remove local changes, then run again.`` and stop.
 3. `gh pr view <number> --json comments --jq '.comments[].body'`. If any body contains `<!-- code-review:posted <headRefOid> -->`, this head was already reviewed on GitHub: output exactly ``PR #<number> already has a code-review comment for this head commit; nothing posted.`` and stop.
 4. `gh api --paginate repos/{owner}/{repo}/pulls/<number>/comments --jq '.[].body'`. Every body containing `<!-- code-review:posted <headRefOid> <id> -->` is a finding a previous run posted before it stopped short of its summary: note each such `<id>` as **already posted**.
 
-**base ref**, **range** and **commit**: PR = `none`. Do not validate or fetch any ref; a missing one is reported by the reviewers as `BASE_NOT_FOUND` or `HEAD_NOT_FOUND`.
-
 ### 2. Dispatch the reviewers
 
-Launch **every reviewer selected in Step 1** (and only those) **in parallel, in a single message**, one Agent call each. Set only `subagent_type` (from the table), `description` and `prompt`, plus `effort` set to the effort from Step 1 when it is not `default`. Never set `model` or `isolation`, and never set `effort` when the user did not pass `--effort`: the reviewers then run at the effort of this session. Send every reviewer this prompt, filled in:
+Launch **every reviewer in the table** **in parallel, in a single message**, one Agent call each. Set only `subagent_type` (from the table), `description` and `prompt`. Never set `model`, `effort` or `isolation`: the reviewers run at the effort of this session. Send every reviewer this prompt, filled in:
 
 ```
 Review the changes in the repository at <repo root>.
-Base ref: <base ref, or "auto-detect">
-Changes: <changes: "working tree", "staged" or "commit <head>">
-Paths: <the paths as a JSON array of strings, e.g. ["apps/web", ":!*.test.ts"], or "all">
+Base ref: <base ref, "auto-detect" or "none">
+Changes: <changes: "working tree" or "commit <branch>">
+Paths: <the paths as a JSON array of strings, e.g. ["apps/web"], or "all">
 PR: <PR, or "none">
 Follow your instructions exactly and return only your report.
 ```
@@ -79,7 +82,7 @@ Wait until every reviewer has returned before Step 3. When they run in the backg
 
 #### 3a. Read each reviewer's result
 
-Every reviewer returns a report in the same shape, written by the plugin's `scripts/render-report.mjs`: a `## <Title> — <verdict>` heading, a summary list, its findings as list items under `### Blocking` and `### Advisory`, other sections, and a **result line** `<!-- code-review:<key> {...} -->` at the end. For each reviewer dispatched in Step 2, take:
+Every reviewer returns a report in the same shape, written by the plugin's `scripts/render-report.mjs`: a `## <Title> — <verdict>` heading, a summary list, its findings as list items under `### Blocking` and `### Advisory`, other sections, and a **result line** `<!-- code-review:<key> {...} -->` at the end. For each reviewer, take:
 
 - **Report**: the text of its Agent result from the first line starting with `## ` through its result line, inclusive. Discard anything outside that range.
 - **Verdict**: the `verdict` field of the result line's JSON. A missing `blocking` or `advisory` array counts as empty.
@@ -124,8 +127,7 @@ Advisory findings do not fail the review.
 ```
 
 - **`<VERDICT>`** is `FAIL` if any reviewer's verdict is `FAIL` or `NOT_RUN`, otherwise `PASS`. Follow it with ` (<counts>)`, where `<counts>` joins with ` · ` the non-zero counts among `<n> blocking` (Blocking items), `<n> advisory` (Advisory items) and `<n> not run` (reviewers). With no non-zero count, write the verdict alone.
-- **`<scope line>`** is `PR <PR> · base <base>` when PR is not `none`, and `No pull request · base <base>` otherwise. `<base>` is the base ref in backticks, or `auto-detected` when it is `auto-detect`. Then append, in this order and only when it applies: ` · staged changes` when changes = `staged`; `` · head `<head>` `` when changes = `commit <head>`; ` · paths ` followed by each pathspec in backticks, joined with `, `, when paths is not `all`; ` · reviewers ` followed by the keys of the selected reviewers, joined with `, `, when subset = yes.
-- **Selected reviewers only.** "Every reviewer" and "table order" below mean the reviewers dispatched in Step 2, in table order. A reviewer left out by `--only` or `--skip` gets no line and no details, and does not count as not run.
+- **`<scope line>`** depends on the mode. Directory mode: `` Directory `<dir>` · whole files ``. Branch mode (another branch): `` Branch `<branch>` · `` followed by the PR part. Every other mode: the PR part alone. The PR part is `PR <PR> · base <base>` when PR is not `none`, and `No pull request · base <base>` otherwise. `<base>` is the base ref in backticks, or `auto-detected` when it is `auto-detect`.
 - **Reviewer lines.** Write one `- <key>: <reviewer verdict>` line per reviewer, in table order. `<reviewer verdict>` is the text after ` — ` in its report heading, e.g. `FAIL (2 blocking)`, `PASS (1 advisory)`, `PASS` or `NOT RUN`.
 - **`## Blocking (<n>)`** lists the Blocking items of every reviewer, in table order, each reviewer's items in the order of its report. `<n>` is the number of items. Put one blank line between consecutive items, including where one reviewer's items end and the next reviewer's begin. With no items, write `None.` under the heading.
 - **`## Advisory (<n>)`** does the same with the Advisory items. Write the line "Advisory findings do not fail the review." only when there are items. With no items, write `None.` under the heading.

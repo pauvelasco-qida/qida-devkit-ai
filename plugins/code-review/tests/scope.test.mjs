@@ -234,3 +234,23 @@ test('the report scope line names staged changes, a commit and the paths', () =>
     '- Scope: `origin/main` (merge-base `1a2b3c4`) → commit `abc1234` · 1 files scanned · 0 skipped · type info: full',
   );
 });
+
+test('--base none reviews the matching files whole: unchanged code counts as added, nothing as moved', (t) => {
+  const dir = makeRepo(t, {
+    base: { 'src/schemas.ts': SCHEMAS, 'src/web/a.ts': parser('src/web/a.ts'), 'src/api/b.ts': parser('src/api/b.ts') },
+    commitHead: false,
+  });
+  // The branch changes nothing: a diff review finds nothing.
+  assert.deepEqual(files(zod(dir)), []);
+  const whole = zod(dir, '--base', 'none', '--path', 'src/web');
+  assert.deepEqual(files(whole), ['src/web/a.ts']);
+  assert.equal(whole.base.ref, 'none');
+  assert.equal(whole.summary.excluded['E-MOVED'] ?? 0, 0);
+  // On a commit, and in a repository with no base branch at all, too.
+  assert.deepEqual(files(zod(dir, '--base', 'none', '--head', 'HEAD', '--path', 'src/api')), ['src/api/b.ts']);
+  git(dir, 'branch', '-q', '-m', 'main', 'trunk');
+  assert.deepEqual(files(zod(dir, '--base', 'none', '--path', 'src/api')), ['src/api/b.ts']);
+  const magic = /** @type {any} */ (runMagic(['--repo', dir, '--base', 'none', '--path', 'src/web', '--typescript', TS_DIR]));
+  assert.equal(magic.error, undefined);
+  assert.equal(magic.base.ref, 'none');
+});

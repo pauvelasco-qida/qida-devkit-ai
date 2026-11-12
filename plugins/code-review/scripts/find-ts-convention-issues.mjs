@@ -22,7 +22,7 @@ import { openRepo, parseScanArgs, scanChanges } from './lib/ts-scan.mjs';
 /** @typedef {import('./lib/ts-rules.mjs').RuleId} RuleId */
 /** @typedef {import('./lib/ts-scan.mjs').ScanItem<RuleId>} RawItem */
 
-export const TOOL_VERSION = '0.4.0';
+export const TOOL_VERSION = '0.4.1';
 
 const HELP = `Usage: find-ts-convention-issues.mjs [options]
 
@@ -30,7 +30,8 @@ Lists TypeScript convention breaches introduced in the working tree (vs. the mer
 --base) and classifies them deterministically. Prints JSON on stdout.
 
 Options:
-  --base <ref>        Base branch/ref (default: origin/HEAD, then origin/main|master|develop, main|master|develop)
+  --base <ref>        Base branch/ref (default: origin/HEAD, then origin/main|master|develop, main|master|develop);
+                      "none" reviews the matching files whole (every line counts as added)
 ${SCOPE_HELP}  --repo <dir>        Repository directory (default: current directory)
   --config <file>     Config file (default: <repo>/.claude/code-review.json)
   --typescript <dir>  typescript package directory (default: auto; env CODE_REVIEW_TYPESCRIPT)

@@ -11,7 +11,7 @@
  */
 
 import { CONFIG_RELATIVE_PATH } from './config.mjs';
-import { WORKTREE } from './git.mjs';
+import { NO_BASE, WORKTREE } from './git.mjs';
 
 /** The config file as cited in report texts. */
 const CONFIG_REF = `\`${CONFIG_RELATIVE_PATH}\``;
@@ -480,7 +480,7 @@ export function renderReport(key, scan, judgments) {
   const paths = scan.scope?.paths ?? [];
   const side = SIDE_TEXT[scan.scope?.changes ?? WORKTREE.kind](head);
   const scope =
-    `- Scope: \`${base.ref}\` (merge-base \`${base.mergeBase.slice(0, 7)}\`) → ${side}` +
+    `- Scope: ${base.ref === NO_BASE ? 'whole files' : `\`${base.ref}\` (merge-base \`${base.mergeBase.slice(0, 7)}\`)`} → ${side}` +
     (paths.length === 0 ? '' : ` · paths ${paths.map((p) => `\`${oneLine(p)}\``).join(', ')}`) +
     ` · ${files.scanned} files scanned · ${files.skipped} skipped${typescript === null ? '' : ` · type info: ${typescript.typeInfo}`}`;
   const summary = [scope, ...(scan.warnings ?? []).map((w) => `- Note: ${oneLine(w)}`)];

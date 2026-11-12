@@ -102,13 +102,20 @@ function refExists(root, ref) {
 }
 
 /**
- * Resolves the base ref to compare against. Explicit ref wins; otherwise origin/HEAD,
- * then the fixed fallback list.
+ * The `--base` value that reviews whole files: every line of the reviewed files counts as added,
+ * compared with git's empty tree instead of a merge-base. Reserved: it never names a ref.
+ */
+export const NO_BASE = 'none';
+
+/**
+ * Resolves the base ref to compare against. Explicit ref wins (`none`: whole files, no base);
+ * otherwise origin/HEAD, then the fixed fallback list.
  * @param {string} root
  * @param {string | null} requested
  * @returns {string}
  */
 export function resolveBaseRef(root, requested) {
+  if (requested === NO_BASE) return NO_BASE;
   if (requested !== null) {
     if (!refExists(root, requested)) {
       throw new ScannerError(
@@ -138,9 +145,12 @@ export function resolveBaseRef(root, requested) {
 /**
  * @param {ReviewedTree} tree The merge-base is taken with the reviewed commit, or with HEAD.
  * @param {string} baseRef
- * @returns {string} Merge-base commit sha between HEAD (or the reviewed commit) and baseRef.
+ * @returns {string} Merge-base commit sha between HEAD (or the reviewed commit) and baseRef, or
+ *   the empty tree's id when baseRef is `NO_BASE`.
  */
 export function mergeBase(tree, baseRef) {
+  // Whole files: git's empty tree (its id depends on the repository's hash algorithm).
+  if (baseRef === NO_BASE) return git(['hash-object', '-t', 'tree', '--stdin'], tree.root, { input: '' }).trim();
   const out = tryGit(['merge-base', tree.headRev, baseRef], tree.root);
   if (out === null) {
     throw new ScannerError('NO_MERGE_BASE', `${tree.headName} and ${baseRef} share no history.`, 2);

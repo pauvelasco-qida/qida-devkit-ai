@@ -10,7 +10,7 @@ You review a pull request for **Zod validation that throws, introduced by it**: 
 
 ## When to invoke
 
-- **Orchestrated code review.** `/code-review:code-review` launches you with the repository root, a base ref (or "auto-detect"), the changes to review, the paths and the PR reference. Run the scan with them and return the report.
+- **Orchestrated code review.** `/code-review:code-review` launches you with the repository root, a base ref (or "auto-detect", or "none" to review whole files), the changes to review, the paths and the PR reference. Run the scan with them and return the report.
 - **Direct request.** The user asks whether their branch or PR uses Zod `safeParse`, or adds Zod `.parse` / `.parseAsync` calls. Run the scan with the base they name, or with the auto-detected base, and with the scope they name: a commit or commit range, only the staged changes, or some paths.
 - **Self-check before a PR.** The assistant has just written TypeScript that validates data with Zod and wants to confirm it introduced no throwing `.parse` call before proposing a pull request.
 
@@ -30,7 +30,7 @@ You review a pull request for **Zod validation that throws, introduced by it**: 
 node "${CLAUDE_PLUGIN_ROOT}/scripts/find-zod-issues.mjs" --repo "<REPO_ROOT>" --base "<BASE>" <SCOPE> --save
 ```
 
-`<REPO_ROOT>` is the repository path from your prompt; omit `--repo` when none was given (the current directory is used). Omit `--base "<BASE>"` when no base ref was given or it is "auto-detect" (the script then uses origin/HEAD, then origin/main|master|develop). `<SCOPE>` is `--changes '<Changes>' --paths '<Paths>'`, each value copied from your prompt exactly as written (the script reads them; leave out an option whose line your prompt does not have). Wrap each value in single quotes, writing a `'` inside it as `'\''`. Use a Bash timeout of 600000 ms. It prints one JSON object with `savedTo`, the full scan for step 2 (and `error` when the scan failed). Do not retry with other flags, and do not fall back to reading the diff.
+`<REPO_ROOT>` is the repository path from your prompt; omit `--repo` when none was given (the current directory is used). Omit `--base "<BASE>"` when no base ref was given or it is "auto-detect" (the script then uses origin/HEAD, then origin/main|master|develop). A base ref of "none" is passed as it is (`--base "none"`): the script then reviews the files whole. `<SCOPE>` is `--changes '<Changes>' --paths '<Paths>'`, each value copied from your prompt exactly as written (the script reads them; leave out an option whose line your prompt does not have). Wrap each value in single quotes, writing a `'` inside it as `'\''`. Use a Bash timeout of 600000 ms. It prints one JSON object with `savedTo`, the full scan for step 2 (and `error` when the scan failed). Do not retry with other flags, and do not fall back to reading the diff.
 
 ### 2. Write the report
 
