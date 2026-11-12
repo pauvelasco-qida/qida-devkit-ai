@@ -11,7 +11,7 @@
  */
 
 import { CONFIG_RELATIVE_PATH } from './config.mjs';
-import { WORKTREE } from './git.mjs';
+import { NO_BASE, WORKTREE } from './git.mjs';
 
 /** The config file as cited in report texts. */
 const CONFIG_REF = `\`${CONFIG_RELATIVE_PATH}\``;
@@ -69,7 +69,7 @@ const CONFIG_REF = `\`${CONFIG_RELATIVE_PATH}\``;
  * @property {string} noun What the Excluded line counts (`literals`, `items`).
  * @property {string} label Sub-item label of the code concerned (`Value`, `Subject`, `Call`).
  * @property {(c: Candidate) => string} code The code concerned, as inline code with its detail.
- * @property {string} noFiles Line written when no file was scanned.
+ * @property {string} noFiles Subject of the line written when no file was scanned (`<noFiles> changed.`, or `found.` for whole files).
  * @property {readonly string[]} typeNoteWhen `typescript.typeInfo` values that add the type Note.
  * @property {string} typeNote
  * @property {boolean} showDisabled Whether to list `config.disabledRules`.
@@ -243,7 +243,7 @@ const MAGIC_STRINGS = {
   noun: 'literals',
   label: 'Value',
   code: (c) => `${inlineCode(cut(oneLine(str(c, 'value')), 40))}${withDetail(c.detail)}`,
-  noFiles: 'No TypeScript/JavaScript files changed.',
+  noFiles: 'No TypeScript/JavaScript files',
   typeNoteWhen: ['none', 'partial'],
   typeNote: 'some files had no tsconfig coverage, so typed literals in them could not be proven safe.',
   showDisabled: false,
@@ -275,7 +275,7 @@ const TS_CONVENTIONS = {
   noun: 'items',
   label: 'Subject',
   code: (c) => `${inlineCode(oneLine(str(c, 'subject')))}${withDetail(c.detail)}`,
-  noFiles: 'No TypeScript files changed.',
+  noFiles: 'No TypeScript files',
   typeNoteWhen: ['none', 'partial', 'disabled'],
   typeNote: 'some files had no type information, so intersections over union types may be over-reported.',
   showDisabled: true,
@@ -319,7 +319,7 @@ const ZOD = {
   noun: 'items',
   label: 'Call',
   code: (c) => inlineCode(oneLine(str(c, 'subject'))),
-  noFiles: 'No TypeScript files changed.',
+  noFiles: 'No TypeScript files',
   typeNoteWhen: ['none', 'partial', 'disabled'],
   typeNote:
     "some files had no type information, so Zod schemas were recognised by their imports and names (see the README's design decisions): a schema from a published package with a neutral name may be missed, and a .parse call in a file that imports zod may be reported on a non-Zod local object.",
@@ -479,8 +479,9 @@ export function renderReport(key, scan, judgments) {
   const { base, head, files, typescript } = scan;
   const paths = scan.scope?.paths ?? [];
   const side = SIDE_TEXT[scan.scope?.changes ?? WORKTREE.kind](head);
+  const baseText = base.ref === NO_BASE ? 'whole files' : `\`${base.ref}\` (merge-base \`${base.mergeBase.slice(0, 7)}\`)`;
   const scope =
-    `- Scope: \`${base.ref}\` (merge-base \`${base.mergeBase.slice(0, 7)}\`) → ${side}` +
+    `- Scope: ${baseText} → ${side}` +
     (paths.length === 0 ? '' : ` · paths ${paths.map((p) => `\`${oneLine(p)}\``).join(', ')}`) +
     ` · ${files.scanned} files scanned · ${files.skipped} skipped${typescript === null ? '' : ` · type info: ${typescript.typeInfo}`}`;
   const summary = [scope, ...(scan.warnings ?? []).map((w) => `- Note: ${oneLine(w)}`)];
@@ -488,7 +489,7 @@ export function renderReport(key, scan, judgments) {
   /** @type {string[]} */
   const blocks = [`## ${spec.title} — ${verdict}`];
   if (typescript === null) {
-    blocks.push(summary.join('\n'), spec.noFiles);
+    blocks.push(summary.join('\n'), `${spec.noFiles} ${base.ref === NO_BASE ? 'found' : 'changed'}.`);
   } else {
     if (spec.typeNoteWhen.includes(typescript.typeInfo)) summary.push(`- Note: ${spec.typeNote}`);
     const disabled = scan.config?.disabledRules ?? [];

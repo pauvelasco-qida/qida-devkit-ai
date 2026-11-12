@@ -56,7 +56,7 @@ import { TypeProber } from './lib/type-probe.mjs';
  * @property {(line: number) => string} snippet Masked snippet of a TypeScript line.
  */
 
-export const TOOL_VERSION = '0.3.0';
+export const TOOL_VERSION = '0.3.1';
 const MAX_DEFINITION_FILES = 400;
 const DEFAULT_MAX_PROBES = 1000;
 const SUPPRESSION_MARKER = 'magic-string-ok';
@@ -68,7 +68,8 @@ Lists string literals added in the working tree (vs. the merge-base with --base)
 them deterministically. Prints JSON on stdout.
 
 Options:
-  --base <ref>        Base branch/ref (default: origin/HEAD, then origin/main|master|develop, main|master|develop)
+  --base <ref>        Base branch/ref (default: origin/HEAD, then origin/main|master|develop, main|master|develop);
+                      "none" reviews the matching files whole (every line counts as added)
 ${SCOPE_HELP}  --repo <dir>        Repository directory (default: current directory)
   --config <file>     Config file (default: <repo>/.claude/code-review.json)
   --typescript <dir>  typescript package directory (default: auto; env CODE_REVIEW_TYPESCRIPT)

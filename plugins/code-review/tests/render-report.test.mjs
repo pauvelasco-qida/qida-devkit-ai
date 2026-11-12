@@ -205,6 +205,11 @@ test('every reviewer: no scanned files gives the short PASS report', () => {
     renderReport('ts-conventions', scan('find-ts-convention-issues', [], { typescript: null }), new Map()),
     /\n\nNo TypeScript files changed\.\n\n<!-- code-review:ts-conventions /,
   );
+  // Whole files (base none): nothing "changed", the scope just has no such file.
+  assert.match(
+    renderReport('zod', scan('find-zod-issues', [], { typescript: null, base: { ref: 'none', mergeBase: '4b825dc642cb' } }), new Map()),
+    /\n\nNo TypeScript files found\.\n\n<!-- code-review:zod /,
+  );
 });
 
 test('ts-conventions: severities, fix variants, file-name location, disabled rules and the type note', () => {
@@ -375,4 +380,13 @@ test('CLI: a scanner with --save feeds render-report end to end', (t) => {
   const usage = spawnSync(process.execPath, [RENDER, '--reviewer', 'nope', '--scan', msOut.savedTo], { encoding: 'utf8' });
   assert.equal(usage.status, 2);
   assert.match(usage.stderr, /--reviewer must be one of magic-strings, ts-conventions, zod\./);
+});
+
+test('a whole-files scan (--base none) names no base or merge-base in its Scope line', () => {
+  const report = renderReport(
+    'zod',
+    scan('find-zod-issues', [], { base: { ref: 'none', mergeBase: '4b825dc642cb' }, scope: { changes: 'worktree', paths: ['apps/web'] } }),
+    new Map(),
+  );
+  assert.ok(report.startsWith('## Zod validation — PASS\n\n- Scope: whole files → `feat/orders` · paths `apps/web` · 3 files scanned · 1 skipped · type info: full\n'), report);
 });
