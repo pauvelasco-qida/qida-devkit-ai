@@ -18,10 +18,12 @@ Pull-request reviewer agents for Qida apps. Each reviewer checks one thing, dete
 
 **Usage:**
 ```bash
-/code-review:code-review [PR | branch | directory] [--comment]
+/code-review:code-review [low|medium|high|xhigh|max] [--fix] [--comment] [<pr#>|<branch>|<path>]
 ```
 
-The arguments follow Anthropic's [`code-review`](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/code-review) plugin (`[PR] [--comment]`), with two more kinds of target.
+The arguments follow Claude Code's built-in `/code-review` (`[level] [--fix] [--comment] [target]`), in any order. The three reviewers always run in parallel, one subagent each.
+
+**Level** (optional): the reasoning effort of the three reviewer agents. It changes how carefully they judge the candidates their scanners leave open (`REVIEW`), not which rules run: violations are decided by the scanners at every level. Without a level, they run at the effort of your session. A level word is never read as a target: write `./high` for a directory named `high`.
 
 **Target** (optional, at most one):
 - *(none)*: the current branch (committed, staged, unstaged and untracked changes), compared with the base of its open PR, otherwise `origin/HEAD`.
@@ -31,8 +33,9 @@ The arguments follow Anthropic's [`code-review`](https://github.com/anthropics/c
 
 **Options:**
 - `--comment`: also post the review on the pull request: one inline comment per finding on the PR head, then one summary comment with the verdict. Without it, output goes to the terminal only. See [Posting on the PR](#posting-on-the-pr).
+- `--fix`: after the report (and after posting, with `--comment`), apply every finding's fix to the working tree, Blocking first, then Advisory, and list each one as fixed or skipped. `V-SECRET` findings, and fixes that need a decision the finding does not settle (where a new module lives, which i18n key, an exported API change), are skipped. Nothing is committed. Not available for another branch (its code is not in the working tree): check it out first.
 
-Any other option (`--staged`, `--only`, `--skip`, `--effort`, `-- <pathspec>`, removed in 0.8.0) is refused with the usage line. The repository's `.claude/code-review.json` and `package.json` files are read from the reviewed side: the working tree, or the branch's last commit. When the review is not the current branch, the report's scope line says what it covered.
+Any other option (`--staged`, `--only`, `--skip`, `--effort`, `-- <pathspec>`) is refused with the usage line. The repository's `.claude/code-review.json` and `package.json` files are read from the reviewed side: the working tree, or the branch's last commit. When the review is not the current branch, the report's scope line says what it covered.
 
 **Example workflow:**
 ```bash
@@ -51,11 +54,14 @@ Any other option (`--staged`, `--only`, `--skip`, `--effort`, `-- <pathspec>`, r
 # Post the review on the PR once it looks right:
 /code-review:code-review --comment
 /code-review:code-review 123 --comment
+
+# Judge open candidates more carefully, then apply the fixes:
+/code-review:code-review high --fix
 ```
 
 `/code-review:code-review` is slash-only (`disable-model-invocation`), so it never competes with other review commands. For a single concern, just ask, e.g. *"check my branch for magic strings"*, *"does my branch follow the TypeScript conventions?"* or *"check this PR for zod .parse calls"*, and Claude dispatches that reviewer directly.
 
-Nothing is modified. Without `--comment`, nothing is posted to GitHub either.
+Without `--fix`, nothing is modified. Without `--comment`, nothing is posted to GitHub either.
 
 ### Posting on the PR
 
@@ -75,7 +81,9 @@ Known limitation: the PR base is fetched from `origin`. For a PR opened from a f
 
 ### The report
 
-`/code-review:code-review` prints one report:
+While it runs, the command prints a `## Running 3 reviewers in parallel` block with the scope and the level, then launches the three reviewers as separate subagents in one message (`magic-strings reviewer`, `ts-conventions reviewer`, `zod reviewer`), so Claude Code shows each one running with its own tool calls. Nothing else is printed until all three have returned.
+
+Whatever happens, the output is Markdown with a fixed shape, never wrapped in a code block. A run that cannot start (bad argument, no PR, unknown target…) prints `# Code review — NOT RUN` with an `Error` line and, for argument errors, a `Usage` line. A run that starts prints one report:
 
 1. `# Code review — PASS`, `# Code review — PASS (<n> advisory)` or `# Code review — FAIL (<n> blocking · <n> advisory · <n> not run)`, with only the non-zero counts. The format of this first line is stable, so a script can read the verdict from it.
 2. The scope: the PR (or `No pull request`) and the base, preceded by the branch when you named another one; or the directory, reviewed as whole files. Then one verdict line per reviewer.

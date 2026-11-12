@@ -32,7 +32,7 @@
     },
     {
       "name": "code-review",
-      "description": "Pull-request reviewer agents for Qida apps (review a PR, a branch or a whole directory; terminal report, optional PR comments with --comment): deterministic magic-string detection for TypeScript/JavaScript (inline domain values, inline query keys per ADR-FE-002, literal UI text per ADR-FE-004, hardcoded secrets) TypeScript conventions for new code (no any or classes per ADR-FE-001, no enums, named exports, import type, plus advisory style rules) and Zod validation (safeParse, never parse)",
+      "description": "Pull-request reviewer agents for Qida apps (review a PR, a branch or a whole directory; terminal report, optional PR comments with --comment, fixes with --fix): deterministic magic-string detection for TypeScript/JavaScript (inline domain values, inline query keys per ADR-FE-002, literal UI text per ADR-FE-004, hardcoded secrets) TypeScript conventions for new code (no any or classes per ADR-FE-001, no enums, named exports, import type, plus advisory style rules) and Zod validation (safeParse, never parse)",
       "source": "./plugins/code-review",
       "category": "development"
     }

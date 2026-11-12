@@ -1,17 +1,40 @@
 ---
-allowed-tools: ["Bash(git rev-parse:*)", "Bash(git merge-base:*)", "Bash(git fetch:*)", "Bash(git status:*)", "Bash(test -d:*)", "Bash(gh pr view:*)", "Bash(gh pr comment:*)", "Bash(gh api:*)", "Agent"]
-description: Run the code-review reviewers on the current branch, a PR, another branch or a whole directory; print one combined report and, with --comment, post it on the PR
+allowed-tools: ["Bash(git rev-parse:*)", "Bash(git merge-base:*)", "Bash(git fetch:*)", "Bash(git status:*)", "Bash(test -d:*)", "Bash(gh pr view:*)", "Bash(gh pr comment:*)", "Bash(gh api:*)", "Agent", "Read", "Edit", "Write"]
+description: Run the code-review reviewers in parallel on the current branch, a PR, another branch or a whole directory; print one combined report, with --comment post it on the PR, with --fix apply the fixes
 disable-model-invocation: true
-argument-hint: "[PR | branch | directory] [--comment]"
+argument-hint: "[low|medium|high|xhigh|max] [--fix] [--comment] [<pr#>|<branch>|<path>]"
 ---
 
 # Code review
 
-Run every reviewer agent of the `code-review` plugin against one scope and print one combined report, and with `--comment` post it on the pull request. This command only fixes the scope, dispatches the reviewers, merges their reports and, when asked, posts them. Each reviewer owns its analysis and its findings.
+Run every reviewer agent of the `code-review` plugin against one scope and print one combined report; with `--comment` post it on the pull request, and with `--fix` apply its fixes to the working tree. This command fixes the scope, dispatches the reviewers, merges their reports and, when asked, posts them and applies their fixes. Each reviewer owns its analysis and its findings.
 
 ## Execute immediately
 
-Start Step 1 as soon as the command is invoked. Do not summarise this command, announce what you are about to do, or ask for confirmation. The only text you output is one stop message from Step 1, or the report from Step 3 followed, with `--comment`, by the one line from Step 4. While the reviewers run, you may only say that they are running: never relay a reviewer's result or a partial verdict.
+Start Step 1 as soon as the command is invoked. Do not summarise this command, announce what you are about to do, or ask for confirmation. The only text you ever output is, in order:
+
+1. either one **stop message** from Step 1 (and nothing else), or the **progress block** from Step 2, followed by the one-line **progress updates** from Step 2 while the reviewers finish;
+2. the **report** from Step 3;
+3. with `--comment`, the one line from Step 4;
+4. with `--fix`, the section from Step 5.
+
+Never output anything else: no preamble, no commentary between steps, no summary or "next steps" after the report, and never relay a reviewer's result or a partial verdict while the reviewers run.
+
+## Output format
+
+Every piece of output is rendered Markdown with a fixed structure, so the user always gets the same shape whatever happened:
+
+- Print it as plain Markdown: never wrap the report, a stop message or the Fixes section in a code block (the fenced blocks in this file only show their shape), never turn its lists into tables, and never reword its fixed texts.
+- **Stop messages.** Every time Step 1 says to output a message and stop, print it in this shape, where `<message>` is the text Step 1 gives (exactly, when it says "exactly"):
+
+  ```
+  # Code review — NOT RUN
+
+  - Error: <message>
+  - Usage: `/code-review:code-review [low|medium|high|xhigh|max] [--fix] [--comment] [<pr#>|<branch>|<path>]`
+  ```
+
+  Write the `Usage` line only when Step 1 says to add the usage line.
 
 ## Reviewers
 
@@ -29,9 +52,13 @@ Reviewers compare **the changes** with a **base ref** (through their merge-base)
 
 `git rev-parse --show-toplevel` gives the **repo root**. If it fails, output `Not inside a git repository.` and stop.
 
-The arguments are at most one **target** and the option `--comment`, in any order. Anything else (a second target, any other option, such as `--staged`, `--only`, `--skip`, `--effort` or `--`) cannot be read: output one line naming the problem, followed by `Usage: /code-review:code-review [PR | branch | directory] [--comment]`, and stop. Do not guess what the user meant.
+The arguments are at most one **level**, the options `--fix` and `--comment`, and at most one **target**, in any order. A word that is exactly `low`, `medium`, `high`, `xhigh` or `max` is always the level, never a target (write `./<name>` for a directory of that name). Anything else (a second level or target, a repeated option, any other option, such as `--staged`, `--only`, `--skip`, `--effort` or `--`) cannot be read: output one line naming the problem, followed by the usage line, and stop. Do not guess what the user meant.
+
+**Level**: the reasoning effort of the reviewer agents (Step 2). It changes how carefully they judge the candidates their scanners leave open, not which rules run. Without a level, the reviewers run at the effort of this session.
 
 `--comment`: after printing the report, post it on the pull request (Step 4). If `--comment` is NOT provided, nothing is posted. It needs a pull request: a PR target, a branch with an open PR, or **auto** mode that finds an open PR.
+
+`--fix`: after the report (and after posting, with `--comment`), apply the findings' fixes to the working tree (Step 5). If `--fix` is NOT provided, no file is modified. It needs the reviewed code to be the working tree, so it cannot be used in branch mode with another branch (checked after the target is resolved).
 
 **Target.** Resolve it with the first rule that applies:
 1. Nothing → **auto** mode.
@@ -50,7 +77,7 @@ Every mode sets **base ref**, **changes**, **paths** and **PR**. Unless a mode s
 
 **branch** (`<branch>` is the target as written):
 1. If `<branch>` equals the output of `git rev-parse --abbrev-ref HEAD`, it is the current branch: continue in **auto** mode, as if no target was given.
-2. Otherwise changes = `commit <ref>`, where `<ref>` is the full ref that Target rule 4 found (`refs/heads/<branch>` or `refs/remotes/<branch>`), so a tag of the same name is never reviewed instead: only what is committed on that branch, which need not be checked out. Run `gh pr view <name> --json number,title,baseRefName,headRefOid,url,state`, where `<name>` is `<branch>`, or for a remote branch (`refs/remotes/<remote>/<name>`) the part after `<remote>/`. If it succeeds and `state` is `OPEN`: `git merge-base --is-ancestor <headRefOid> <ref>` must succeed, so the review never shows stale code under the PR's name. If it fails, output exactly ``Branch <branch> does not contain the head of PR #<number>: pull it, or pass the PR number instead.`` and stop (local commits on top of the PR head are allowed). Then run PR step 3 with its `baseRefName`, and PR = `#<number> <title> — <url>`. Otherwise base ref = `auto-detect`; fetch nothing. With `--comment` and PR = `none`, output exactly ``--comment needs an open pull request for branch <branch>.`` and stop.
+2. Otherwise changes = `commit <ref>`, where `<ref>` is the full ref that Target rule 4 found (`refs/heads/<branch>` or `refs/remotes/<branch>`), so a tag of the same name is never reviewed instead: only what is committed on that branch, which need not be checked out. Run `gh pr view <name> --json number,title,baseRefName,headRefOid,url,state`, where `<name>` is `<branch>`, or for a remote branch (`refs/remotes/<remote>/<name>`) the part after `<remote>/`. If it succeeds and `state` is `OPEN`: `git merge-base --is-ancestor <headRefOid> <ref>` must succeed, so the review never shows stale code under the PR's name. If it fails, output exactly ``Branch <branch> does not contain the head of PR #<number>: pull it, or pass the PR number instead.`` and stop (local commits on top of the PR head are allowed). Then run PR step 3 with its `baseRefName`, and PR = `#<number> <title> — <url>`. Otherwise base ref = `auto-detect`; fetch nothing. With `--comment` and PR = `none`, output exactly ``--comment needs an open pull request for branch <branch>.`` and stop. With `--fix`, output exactly ``--fix needs the reviewed code in the working tree: check out <branch> and run again without a target.`` before running any of this, and stop.
 
 **directory**:
 1. `test -d <target>` must succeed. Otherwise output exactly ``Directory not found: <target>`` and stop.
@@ -65,7 +92,19 @@ Every mode sets **base ref**, **changes**, **paths** and **PR**. Unless a mode s
 
 ### 2. Dispatch the reviewers
 
-Launch **every reviewer in the table** **in parallel, in a single message**, one Agent call each. Set only `subagent_type` (from the table), `description` and `prompt`. Never set `model`, `effort` or `isolation`: the reviewers run at the effort of this session. Send every reviewer this prompt, filled in:
+Your response for this step is the three Agent calls (below), with no text before them (never describe the scope you settled), and then, as the only text that ends your turn, the **progress block**. It tells the user what is running. Write it instead of any sentence of your own, such as "The reviewers are still running":
+
+```
+## Running 3 reviewers in parallel
+
+<scope line, as in Step 3b> · level: <level, or "session default">
+
+- magic-strings: no magic strings introduced in TS/JS
+- ts-conventions: TypeScript conventions for new code
+- zod: Zod validation uses safeParse
+```
+
+Launch **every reviewer in the table** **in parallel, in a single message**, one Agent call each, never one after another, and never as a workflow or a single agent that runs the others: Claude Code shows each Agent call to the user as its own running subagent, with its description and its tool calls, so the user can follow every reviewer while it runs. Set `subagent_type` (from the table), `description` to `<key> reviewer` (for example `magic-strings reviewer`), `prompt`, and, when the user gave a level, `effort` set to that level, the same for every reviewer. Never set `model` or `isolation`, and never set `effort` without a level: the reviewers then run at the effort of this session. Send every reviewer this prompt, filled in:
 
 ```
 Review the changes in the repository at <repo root>.
@@ -76,7 +115,11 @@ PR: <PR, or "none">
 Follow your instructions exactly and return only your report.
 ```
 
-Wait until every reviewer has returned before Step 3. When they run in the background, end your turn after dispatching them; each reviewer's completion notification resumes you. Do not schedule a wakeup, poll or sleep to wait: a scheduled wakeup would run the whole review again later.
+Wait until every reviewer has returned before Step 3. When they run in the background, end your turn after dispatching them with the progress block, and make no other tool call (not even a no-op command); each reviewer's completion notification resumes you. When a notification arrives while other reviewers are still running, output only this one line and end your turn again, with no other words:
+
+`- <key> done · waiting for <keys still running, joined with ", ">`
+
+Never call `ScheduleWakeup` (not even to stop one), `Monitor`, `sleep` or any polling: a scheduled wakeup would run the whole review again later.
 
 ### 3. Report
 
@@ -102,7 +145,7 @@ The reviewer is **not run** when any of these holds. Its verdict is then `NOT_RU
 
 #### 3b. Print the combined report
 
-Output exactly the following, with nothing before it and nothing after it except the line from Step 4:
+Output exactly the following, with nothing before it and nothing after it except the line from Step 4 and the section from Step 5:
 
 ```
 # Code review — <VERDICT>
@@ -127,7 +170,7 @@ Advisory findings do not fail the review.
 ```
 
 - **`<VERDICT>`** is `FAIL` if any reviewer's verdict is `FAIL` or `NOT_RUN`, otherwise `PASS`. Follow it with ` (<counts>)`, where `<counts>` joins with ` · ` the non-zero counts among `<n> blocking` (Blocking items), `<n> advisory` (Advisory items) and `<n> not run` (reviewers). With no non-zero count, write the verdict alone.
-- **`<scope line>`** depends on the mode. Directory mode: `` Directory `<dir>` · whole files ``. Branch mode (another branch): `` Branch `<branch>` · `` followed by the PR part. Every other mode: the PR part alone. The PR part is `PR <PR> · base <base>` when PR is not `none`, and `No pull request · base <base>` otherwise. `<base>` is the base ref in backticks, or `auto-detected` when it is `auto-detect`.
+- **`<scope line>`** depends on the mode. Directory mode: `` Directory `<dir>` · whole files ``. Branch mode (another branch): `` Branch `<branch>` · `` followed by the PR part. Every other mode: the PR part alone. The PR part is `PR <PR> · base <base>` when PR is not `none`, and `No pull request · base <base>` otherwise. `<base>` is the base ref in backticks, or the plain word auto-detected, without backticks, when it is `auto-detect` (`No pull request · base auto-detected`).
 - **Reviewer lines.** Write one `- <key>: <reviewer verdict>` line per reviewer, in table order. `<reviewer verdict>` is the text after ` — ` in its report heading, e.g. `FAIL (2 blocking)`, `PASS (1 advisory)`, `PASS` or `NOT RUN`.
 - **`## Blocking (<n>)`** lists the Blocking items of every reviewer, in table order, each reviewer's items in the order of its report. `<n>` is the number of items. Put one blank line between consecutive items, including where one reviewer's items end and the next reviewer's begin. With no items, write `None.` under the heading.
 - **`## Advisory (<n>)`** does the same with the Advisory items. Write the line "Advisory findings do not fail the review." only when there are items. With no items, write `None.` under the heading.
@@ -194,7 +237,7 @@ To accept a case deliberately: add `// ts-conventions-ok: <reason>` on its line 
 - Excluded by the scanner: 0 items
 ```
 
-If `--comment` argument was NOT provided, stop here. Do not post anything to GitHub.
+If `--comment` argument was NOT provided, skip Step 4: do not post anything to GitHub. If `--fix` was not provided either, stop here.
 
 ### 4. Post on the pull request (`--comment` only)
 
@@ -220,4 +263,29 @@ Post only what Step 3 printed; never add, reword or drop a finding. Use `gh` for
    `<summary>` is, in this order: the report's first line made a `##` heading (`## Code review — FAIL (2 blocking)`); the scope line; the reviewer lines; when some inline comments failed, a `### Not anchored (<n>)` section holding those items as printed in the report; when no finding was reported at all, the line `No issues found. Checked: <keys of the reviewers that ran, joined with ", ">.`; and last the line `<!-- code-review:posted <headRefOid> -->`.
 3. Output one line after the report: ``Posted on PR #<number>: <i> inline comments, 1 summary comment.``, adding ``, <n> not anchored (in the summary)`` when some inline comments failed and ``, <k> already posted`` when check 4 found some. If the summary comment itself fails, output ``Could not post the summary on PR #<number>: <first line of the error>`` instead.
 
-Do not fix code or commit anything. If the user then asks for fixes, treat that as a new request.
+If `--fix` was NOT provided, stop here: do not fix code or commit anything. If the user then asks for fixes, treat that as a new request.
+
+### 5. Apply the fixes (`--fix` only)
+
+Fix only what Step 3 printed, Blocking items first, then Advisory, in report order. The reviewers never modify files; you do, with `Read`, `Edit` and, only to add a constant or key to an existing module, `Write`. Never commit, stage, stash, run formatters or touch a file no finding names, apart from the module a finding's Fix line points to.
+
+For each item, take its id, `<path>:<line>`, rule and its `Fix:` line, and:
+
+1. **Skip** it, with the reason in brackets, when:
+   - its rule is `V-SECRET` (`a credential must be removed and rotated by hand`);
+   - the Fix line asks for a choice it does not settle, such as where a new module lives, which i18n key or namespace to use, or a change to an exported API (`needs a decision: <what>`);
+   - the code at `<path>:<line>` no longer matches the item, for example because an earlier fix changed it (`code changed since the review`).
+2. Otherwise `Read` the file around the line, apply the smallest change that does what the Fix line says, keep the file's style, and touch nothing else. When a fix adds a named constant, reuse the one the Fix line names if there is one.
+
+Then output, after the report (and after the line from Step 4):
+
+```
+## Fixes (<f> fixed · <s> skipped)
+
+- **<id>** `<path>:<line>` — fixed
+- **<id>** `<path>:<line>` — skipped (<reason>)
+
+Nothing was committed. Run /code-review:code-review again to check the result.
+```
+
+List every item once, in the order handled. With no Blocking or Advisory items, output only `## Fixes` followed by `Nothing to fix.`
