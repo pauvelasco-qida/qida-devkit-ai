@@ -2,11 +2,37 @@
 /**
  * Package resolution for the untyped Zod fallback: which dependencies the package.json files above
  * a file declare, which packages are workspace members (project code), and which undeclared ones
- * are installed in node_modules. Everything is read lazily and cached.
+ * are installed in node_modules. Everything is read lazily and cached. package.json files and the
+ * workspace layout are read from the reviewed side (the working tree, the index or a commit);
+ * node_modules is never committed, so it is always read from disk.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { globToRegExp as configGlob, readJson } from './config.mjs';
+import { globToRegExp as configGlob, parseJson } from './config.mjs';
+
+/** @typedef {import('./git.mjs').ReviewedTree} ReviewedTree */
+
+/**
+ * A file of a repo-relative directory (`''`: the root).
+ * @param {string} dir
+ * @param {string} name
+ * @returns {string}
+ */
+function fileIn(dir, name) {
+  return dir === '' ? name : `${dir}/${name}`;
+}
+
+/**
+ * A parsed JSON file of the reviewed side: undefined when it is missing; throws when it cannot be
+ * parsed.
+ * @param {ReviewedTree} tree
+ * @param {string} rel
+ * @returns {any}
+ */
+function jsonAt(tree, rel) {
+  const text = tree.readText(rel);
+  return text === null ? undefined : parseJson(text);
+}
 
 /**
  * Parent of a repo-relative POSIX directory (or a file's directory), `''` for the root.
@@ -22,10 +48,11 @@ export function parentDir(p) {
  * Dependencies declared by the package.json files from a file's directory up to the repository
  * root (dependencies, devDependencies, peerDependencies, optionalDependencies), cached per directory.
  * Everything is read lazily, the first time a receiver without type information needs it.
- * @param {string} root
+ * @param {ReviewedTree} tree
  * @returns {(rel: string) => import('./zod-detect.mjs').PackageLookup}
  */
-export function declaredPackages(root) {
+export function declaredPackages(tree) {
+  const root = tree.root;
   /**
    * Per directory: its own package.json entries and the nearest ancestor scope. Nothing is
    * copied: a lookup walks up the chain. null: no package.json on the path (unknown).
@@ -37,7 +64,7 @@ export function declaredPackages(root) {
   const cache = new Map();
   /** @type {Set<string> | null} */
   let membersCache = null;
-  const members = () => (membersCache ??= workspaceMembers(root));
+  const members = () => (membersCache ??= workspaceMembers(tree));
   /** @param {string} dir Repo-relative directory ('' for the root). @returns {Scope | null} */
   const forDir = (dir) => {
     const hit = cache.get(dir);
@@ -45,9 +72,8 @@ export function declaredPackages(root) {
     const parent = dir === '' ? null : forDir(parentDir(dir));
     /** @type {Scope | null} */
     let scope = parent;
-    const file = path.join(root, dir, 'package.json');
-    if (fs.existsSync(file)) try {
-      const pkg = readJson(file);
+    if (tree.exists(fileIn(dir, 'package.json'))) try {
+      const pkg = jsonAt(tree, fileIn(dir, 'package.json'));
       /** @type {Map<string, string>} */
       const own = new Map();
       for (const key of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
@@ -120,20 +146,20 @@ export function globToRegExp(pattern) {
  * list). Patterns are globs (`packages/*`, `apps/*-service`, `packages/**`); `!` patterns remove
  * matches; `{a,b}` braces expand. Candidate directories are those below each pattern's fixed prefix,
  * as deep as the pattern reaches (8 levels for `**`), skipping build output and dependencies.
- * @param {string} root
+ * @param {ReviewedTree} tree
  * @returns {Set<string>}
  */
-export function workspaceMembers(root) {
+export function workspaceMembers(tree) {
   /** @type {string[]} */
   const patterns = [];
   try {
-    const pkg = readJson(path.join(root, 'package.json'));
+    const pkg = jsonAt(tree, 'package.json');
     const ws = Array.isArray(pkg?.workspaces) ? pkg.workspaces : pkg?.workspaces?.packages;
     if (Array.isArray(ws)) patterns.push(...ws.filter((w) => typeof w === 'string'));
   } catch {
     // No root package.json.
   }
-  patterns.push(...pnpmPatterns(root));
+  patterns.push(...pnpmPatterns(tree));
   const expanded = patterns.flatMap(expandBraces);
   const include = expanded.filter((p) => !p.startsWith('!'));
   const exclude = expanded.filter((p) => p.startsWith('!')).map((p) => globToRegExp(p.slice(1)));
@@ -149,30 +175,23 @@ export function workspaceMembers(root) {
     const visit = (dir, depth) => {
       // Every directory up to the pattern's depth is a candidate, packages included: members can
       // sit below another package (`apps/*/packages/*`), and the root can be the prefix (`*`).
-      const name = packageName(root, dir);
+      const name = packageName(tree, dir);
       // The root package is the workspace itself, never one of its members.
       if (name !== null && dir !== '' && re.test(dir)) found.set(dir, name);
       if (depth >= maxDepth) return;
-      /** @type {import('node:fs').Dirent[]} */
-      let entries = [];
-      try {
-        entries = fs.readdirSync(path.join(root, dir), { withFileTypes: true });
-      } catch {
-        return;
-      }
-      for (const d of entries) {
-        if (!d.isDirectory() || d.name.startsWith('.')) continue;
-        const sub = dir === '' ? d.name : `${dir}/${d.name}`;
+      for (const child of tree.subdirs(dir)) {
+        if (child.startsWith('.')) continue;
+        const sub = fileIn(dir, child);
         // A build-output or dependency folder is not walked, but it can still be a package itself
         // (`tools/build` named `@qida/build`).
-        if (SKIP_DIRS.has(d.name)) {
-          const name = packageName(root, sub);
+        if (SKIP_DIRS.has(child)) {
+          const name = packageName(tree, sub);
           if (name !== null && re.test(sub)) found.set(sub, name);
         } else visit(sub, depth + 1);
       }
     };
     if (firstWild === -1) {
-      const name = packageName(root, prefix);
+      const name = packageName(tree, prefix);
       if (name !== null) found.set(prefix, name);
     } else visit(prefix, 0);
   }
@@ -195,18 +214,14 @@ function expandBraces(pattern) {
 
 /**
  * The `packages` list of pnpm-workspace.yaml (block or flow form; comments and blank lines skipped).
- * @param {string} root
+ * @param {ReviewedTree} tree
  * @returns {string[]}
  */
-function pnpmPatterns(root) {
+function pnpmPatterns(tree) {
   /** @type {string[]} */
   const out = [];
-  let yaml;
-  try {
-    yaml = fs.readFileSync(path.join(root, 'pnpm-workspace.yaml'), 'utf8');
-  } catch {
-    return out;
-  }
+  const yaml = tree.readText('pnpm-workspace.yaml');
+  if (yaml === null) return out;
   let inPackages = false;
   for (const line of yaml.split(/\r?\n/)) {
     if (/^\s*(?:#.*)?$/.test(line)) continue;
@@ -232,15 +247,13 @@ function pnpmPatterns(root) {
 
 /**
  * The `name` of a directory's package.json, or null.
- * @param {string} root
+ * @param {ReviewedTree} tree
  * @param {string} dir
  * @returns {string | null}
  */
-function packageName(root, dir) {
-  const file = path.join(root, dir, 'package.json');
-  if (!fs.existsSync(file)) return null;
+function packageName(tree, dir) {
   try {
-    const name = readJson(file)?.name;
+    const name = jsonAt(tree, fileIn(dir, 'package.json'))?.name;
     return typeof name === 'string' ? name : null;
   } catch {
     return null;

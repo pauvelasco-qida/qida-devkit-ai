@@ -3,14 +3,14 @@
 /**
  * find-magic-strings — deterministic candidate extractor for the magic-string-reviewer agent.
  *
- * Compares the working tree with the merge-base of HEAD and a base branch, parses every changed
+ * Compares the working tree (or the index, or a commit) with the merge-base of HEAD and a base
+ * branch, optionally limited to some paths, parses every changed
  * TS/JS file with the TypeScript compiler, and classifies every string literal on an added line
  * with a fixed, ordered rule set. Output is JSON on stdout; the same repository state always
  * produces byte-identical output.
  *
  * Exit codes: 0 ok (whatever the findings), 2 usage/config error, 3 environment error.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import {
   classifySyntax,
@@ -22,20 +22,22 @@ import {
   shapeOf,
   staticLength,
 } from './lib/classify.mjs';
-import { runIfMain, sortBy } from './lib/cli.mjs';
+import { SCOPE_HELP, runIfMain, sortBy } from './lib/cli.mjs';
 import { isScannedExtension, loadConfig, skipReason } from './lib/config.mjs';
 import { ScannerError } from './lib/errors.mjs';
-import { grepFiles, repoRoot } from './lib/git.mjs';
+import { grepFiles } from './lib/git.mjs';
 import { PLACEHOLDER } from './lib/rules.mjs';
 import {
   deletedSources,
   filePositions,
   suppressionChecker,
   tallyBy,
+  openRepo,
   openScan,
   openSources,
   parseScanArgs,
-  unreadableWarning,
+  readWarnings,
+  scannedTexts,
   sourceLines,
 } from './lib/ts-scan.mjs';
 import { holdsSecretText, redactRecords, snippetMasker } from './lib/redact.mjs';
@@ -54,7 +56,7 @@ import { TypeProber } from './lib/type-probe.mjs';
  * @property {(line: number) => string} snippet Masked snippet of a TypeScript line.
  */
 
-export const TOOL_VERSION = '0.2.0';
+export const TOOL_VERSION = '0.3.0';
 const MAX_DEFINITION_FILES = 400;
 const DEFAULT_MAX_PROBES = 1000;
 const SUPPRESSION_MARKER = 'magic-string-ok';
@@ -67,7 +69,7 @@ them deterministically. Prints JSON on stdout.
 
 Options:
   --base <ref>        Base branch/ref (default: origin/HEAD, then origin/main|master|develop, main|master|develop)
-  --repo <dir>        Repository directory (default: current directory)
+${SCOPE_HELP}  --repo <dir>        Repository directory (default: current directory)
   --config <file>     Config file (default: <repo>/.claude/code-review.json)
   --typescript <dir>  typescript package directory (default: auto; env CODE_REVIEW_TYPESCRIPT)
   --no-types          Skip type-check probes (faster, less precise)
@@ -166,9 +168,10 @@ export function run(argv) {
   const opts = parseScanArgs(argv, { maxProbes: DEFAULT_MAX_PROBES });
   if (opts.help) return { help: HELP };
 
-  const root = repoRoot(path.resolve(opts.repo));
-  const { config, path: configPath, warnings } = loadConfig(root, opts.config);
-  const { base, scanned, header, files } = openScan(root, opts, config, isScannedExtension);
+  const tree = openRepo(opts);
+  const root = tree.root;
+  const { config, path: configPath, warnings } = loadConfig(tree, opts.config);
+  const { base, moves, scanned, header, files } = openScan(tree, opts, config, isScannedExtension);
 
   /** @type {Record<string, number>} */
   const excludedCounts = {};
@@ -206,11 +209,10 @@ export function run(argv) {
   const work = [];
   /** @type {Map<string, SourceFile>} */
   const headFiles = new Map();
+  const { entries, unread } = scannedTexts(tree, scanned);
 
-  for (const f of scanned) {
-    const abs = path.join(root, f.path);
-    const text = fs.readFileSync(abs, 'utf8');
-    const sf = parse(abs, text);
+  for (const { file: f, text } of entries) {
+    const sf = parse(path.join(root, f.path), text);
     headFiles.set(f.path, sf);
     const lits = collectLiterals(ts, sf);
     tally(lits, 1);
@@ -263,9 +265,9 @@ export function run(argv) {
   }
 
   // Literals moved out of deleted files are not introduced either (read only when something can move).
-  const deleted = work.length > 0 ? deletedSources(root, base, config, isScannedExtension) : { sources: [], unreadable: [] };
+  const deleted = work.length > 0 ? deletedSources(tree, base, config, isScannedExtension, moves) : { sources: [], unreadable: [] };
   for (const d of deleted.sources) tally(collectLiterals(ts, parse(d.path, d.text)), -1);
-  const baseWarnings = unreadableWarning([...unreadable, ...deleted.unreadable]);
+  const baseWarnings = readWarnings(unread, [...unreadable, ...deleted.unreadable]);
   baseWarnings.unshift(...allowWarnings);
 
   // Step 1 — per-literal rules, fixed order, first match wins. A known credential format comes
@@ -316,11 +318,12 @@ export function run(argv) {
   if (prober !== null) {
     for (const f of scanned) {
       const abs = path.join(root, f.path);
-      if (!prober.hasTypes(abs)) continue;
+      const sf = headFiles.get(f.path);
+      // The type checker reads the files on disk: it counts only when it sees the reviewed text.
+      if (sf === undefined || !prober.seesText(abs, sf.text)) continue;
       filesWithTypes += 1;
       const pending = work.filter((w) => w.file === f.path && w.verdict === 'PENDING');
-      const sf = headFiles.get(f.path);
-      if (pending.length === 0 || sf === undefined) continue;
+      if (pending.length === 0) continue;
       const typed = prober.probeFile(
         abs,
         pending.map((w) => w.lit),
@@ -354,7 +357,7 @@ export function run(argv) {
     /** @type {string[]} */
     let matches = [];
     try {
-      matches = grepFiles(root, needles, SOURCE_PATHSPECS);
+      matches = grepFiles(tree, needles, SOURCE_PATHSPECS);
     } catch (e) {
       if (!(e instanceof ScannerError)) throw e;
       // Keep the report, but say that existing constants in other files were not searched.
@@ -368,12 +371,14 @@ export function run(argv) {
     for (const p of headFiles.keys()) files.add(p);
     /** @type {Map<string, { name: string, file: string, line: number }[]>} */
     const defs = new Map();
+    // Other files holding a value are read on the reviewed side too (disk, index or commit).
+    const others = tree.readFiles(sortBy([...files].filter((p) => !headFiles.has(p)), (x) => x)).texts;
     for (const p of sortBy([...files], (x) => x)) {
       let sf = headFiles.get(p);
       if (sf === undefined) {
-        const abs = path.join(root, p);
-        if (!fs.existsSync(abs)) continue;
-        sf = parse(p, fs.readFileSync(abs, 'utf8'));
+        const text = others.get(p);
+        if (text === undefined) continue;
+        sf = parse(p, text);
       }
       /** @type {FilePositions | null} */
       let at = null;

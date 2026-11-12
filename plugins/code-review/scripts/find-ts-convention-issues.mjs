@@ -9,13 +9,12 @@
  *
  * Exit codes: 0 ok (whatever the findings), 2 usage/config error, 3 environment error.
  */
-import path from 'node:path';
-import { runIfMain } from './lib/cli.mjs';
+import { SCOPE_HELP, runIfMain } from './lib/cli.mjs';
 import { globToRegExp, loadTsConventionsConfig } from './lib/config.mjs';
-import { pathExistsAtCommit, repoRoot } from './lib/git.mjs';
+import { pathExistsAtCommit } from './lib/git.mjs';
 import { detect, directoryNameIssue, exportedNames, fileNameIssue } from './lib/ts-detect.mjs';
 import { PASCAL_CASE_FACTORIES, RULES, RULE_IDS, SUPPRESSION_MARKER } from './lib/ts-rules.mjs';
-import { parseScanArgs, scanChanges } from './lib/ts-scan.mjs';
+import { openRepo, parseScanArgs, scanChanges } from './lib/ts-scan.mjs';
 
 /** @typedef {typeof import('typescript')} TS */
 /** @typedef {import('typescript').SourceFile} SourceFile */
@@ -23,7 +22,7 @@ import { parseScanArgs, scanChanges } from './lib/ts-scan.mjs';
 /** @typedef {import('./lib/ts-rules.mjs').RuleId} RuleId */
 /** @typedef {import('./lib/ts-scan.mjs').ScanItem<RuleId>} RawItem */
 
-export const TOOL_VERSION = '0.3.0';
+export const TOOL_VERSION = '0.4.0';
 
 const HELP = `Usage: find-ts-convention-issues.mjs [options]
 
@@ -32,7 +31,7 @@ Lists TypeScript convention breaches introduced in the working tree (vs. the mer
 
 Options:
   --base <ref>        Base branch/ref (default: origin/HEAD, then origin/main|master|develop, main|master|develop)
-  --repo <dir>        Repository directory (default: current directory)
+${SCOPE_HELP}  --repo <dir>        Repository directory (default: current directory)
   --config <file>     Config file (default: <repo>/.claude/code-review.json)
   --typescript <dir>  typescript package directory (default: auto; env CODE_REVIEW_TYPESCRIPT)
   --no-types          Do not build the type checker (faster; the intersection rule falls back to syntax)
@@ -48,14 +47,15 @@ export function run(argv) {
   const opts = parseScanArgs(argv);
   if (opts.help) return { help: HELP };
 
-  const root = repoRoot(path.resolve(opts.repo));
-  const loaded = loadTsConventionsConfig(root, opts.config, RULE_IDS);
+  const tree = openRepo(opts);
+  const root = tree.root;
+  const loaded = loadTsConventionsConfig(tree, opts.config, RULE_IDS);
   const factories = new Set([...PASCAL_CASE_FACTORIES, ...loaded.config.pascalCaseFactories]);
   const defaultExportRes = loaded.config.defaultExportPaths.map(globToRegExp);
   /** @type {Set<string>} */
   const seenDirs = new Set();
 
-  return scanChanges(root, opts, loaded, {
+  return scanChanges(tree, opts, loaded, {
     tool: 'find-ts-convention-issues',
     version: TOOL_VERSION,
     idPrefix: 'TC',

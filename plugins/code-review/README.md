@@ -1,6 +1,6 @@
 # code-review
 
-Pull-request reviewer agents for Qida apps. Each reviewer checks one thing, deterministically where possible, and reports in a fixed format. `/code-review:review` runs them all on the same diff and prints every finding in one list.
+Pull-request reviewer agents for Qida apps. Each reviewer checks one thing, deterministically where possible, and reports in a fixed format. `/code-review:code-review` runs them (all, or the ones you pick) on the same diff and prints every finding in one list; with `--comment` it also posts them on the pull request.
 
 | Reviewer | Agent | Checks |
 |---|---|---|
@@ -16,27 +16,88 @@ Pull-request reviewer agents for Qida apps. Each reviewer checks one thing, dete
 
 ## Usage
 
-```
-/code-review:review                  # current branch: base of its open PR, otherwise origin/HEAD
-/code-review:review 123              # PR #123, or its URL (must be checked out: gh pr checkout 123)
-/code-review:review origin/develop   # explicit base ref
-/code-review:review 123 --effort high   # any of the above, with the reviewers' reasoning effort
+**Usage:**
+```bash
+/code-review:code-review [PR | base ref | A..B | <commit>^!] [--staged] [--only <keys> | --skip <keys>] [--effort <level>] [--comment] [-- <pathspec>...]
 ```
 
-`--effort low|medium|high|xhigh|max` sets the reasoning effort of every reviewer agent (they always run on Sonnet). Without it, each reviewer runs at the effort of the session that invoked the review. `max` is the costliest level.
+**Target** (optional, at most one):
+- *(none)*: the current branch, compared with the base of its open PR, otherwise `origin/HEAD`.
+- `123`, `#123` or a PR URL: that PR. It must be checked out here (`gh pr checkout 123`).
+- A base ref (`origin/develop`, `HEAD~3`, `HEAD`): the working tree compared with its merge-base with that ref.
+- `A..B` or `A...B`: only what is committed in `B` since its merge-base with `A`. An empty side means `HEAD`.
+- `X^!`: the single commit `X`.
 
-`/code-review:review` is slash-only (`disable-model-invocation`), so it never competes with other review commands. For a single concern, just ask, e.g. *"check my branch for magic strings"*, *"does my branch follow the TypeScript conventions?"* or *"check this PR for zod .parse calls"*, and Claude dispatches that reviewer directly.
+**Options:**
+- `--staged`: review only the staged changes (vs. `HEAD`, or vs. the base ref given). Cannot be combined with a range or commit.
+- `--only <keys>` / `--skip <keys>`: run only these reviewers, or all but these. Keys are comma-separated: `magic-strings`, `ts-conventions`, `zod`.
+- `--effort <level>`: reasoning effort of every reviewer agent: `low`, `medium`, `high`, `xhigh` or `max` (the costliest). Default: the effort of the invoking session.
+- `--comment`: also post the review on the pull request: one inline comment per finding on the PR head, then one summary comment with the verdict. Without it, output goes to the terminal only. See [Posting on the PR](#posting-on-the-pr).
+- `-- <pathspec>...`: review only the matching files. Each word is a git pathspec: a directory, a file, a glob (`*` also matches `/`) or an exclusion `':!<pathspec>'` (quote the ones with `!` or `*`).
 
-The review covers the **working tree**: committed, staged, unstaged and untracked changes, compared with the merge-base of `HEAD` and the base ref. Output goes to the terminal only. Nothing is posted to GitHub and nothing is modified.
+Without a range, a commit or `--staged`, the review covers the **working tree**: committed, staged, unstaged and untracked changes. With `--staged` it covers the index only, and with a range or commit only what is committed. The repository's `.claude/code-review.json` and `package.json` files are read from that same side. Code moved in from a file outside the paths is still recognised as moved, not new. When you narrow the review, the report's scope line says how.
 
-Known limitation: the PR base is fetched from `origin`. For a PR opened from a fork where `origin` is the fork, pass the upstream base ref explicitly (`/code-review:review upstream/develop`).
+**Example workflow:**
+```bash
+# On your branch, before opening the PR:
+/code-review:code-review
+
+# Pre-commit check of what you staged:
+/code-review:code-review --staged
+
+# A checked-out PR, against its base:
+/code-review:code-review 123
+
+# Another base, or only the last 3 commits + uncommitted changes:
+/code-review:code-review origin/develop
+/code-review:code-review HEAD~3
+
+# Committed changes only: a range, or a single commit:
+/code-review:code-review origin/main..HEAD
+/code-review:code-review abc123^!
+
+# Only some files:
+/code-review:code-review -- apps/web ':!*.test.ts'
+
+# Only some reviewers:
+/code-review:code-review --only zod,ts-conventions --effort low
+/code-review:code-review 123 --skip magic-strings
+
+# Combined:
+/code-review:code-review 123 --only zod --effort medium -- apps/web
+
+# Post the review on the PR once it looks right:
+/code-review:code-review --comment
+/code-review:code-review 123 --comment
+```
+
+`/code-review:code-review` is slash-only (`disable-model-invocation`), so it never competes with other review commands. For a single concern, just ask, e.g. *"check my branch for magic strings"*, *"does my branch follow the TypeScript conventions?"* or *"check this PR for zod .parse calls"*, and Claude dispatches that reviewer directly.
+
+Nothing is modified. Without `--comment`, nothing is posted to GitHub either.
+
+### Posting on the PR
+
+With `--comment`, after printing the report, the command posts it on the pull request with `gh`:
+
+- **One inline comment per finding** (Blocking first, then Advisory) on its `file:line` in the PR head, with the same text as the report.
+- **One summary comment**: the verdict, the scope, one line per reviewer, and any finding GitHub would not anchor (a line outside the PR diff). With no findings it says `No issues found. Checked: <reviewers>.`
+
+To make sure the comments point at the code GitHub shows, `--comment` needs:
+
+- a pull request: a PR number or URL, or a branch with an open PR;
+- the pushed PR head checked out (`HEAD` = the PR head commit) and a clean working tree;
+- no `--staged`, base ref, range or commit.
+
+Every comment carries a hidden `<!-- code-review:posted <sha> … -->` marker. A second `--comment` run on the same head commit posts nothing once the summary is posted; push new commits to review again. If a run stopped before its summary, the next one posts only the findings not yet posted, then the summary. `--only`, `--skip`, `--effort` and paths work as usual.
+
+Known limitation: the PR base is fetched from `origin`. For a PR opened from a fork where `origin` is the fork, pass the upstream base ref explicitly (`/code-review:code-review upstream/develop`).
 
 ### The report
 
-`/code-review:review` prints one report:
+`/code-review:code-review` prints one report:
 
 1. `# Code review — PASS`, `# Code review — PASS (<n> advisory)` or `# Code review — FAIL (<n> blocking · <n> advisory · <n> not run)`, with only the non-zero counts. The format of this first line is stable, so a script can read the verdict from it.
-2. The PR (or `No pull request`) and the base, then one verdict line per reviewer.
+2. The scope: the PR (or `No pull request`), the base, and the staged changes, head commit, paths and reviewers when you narrowed them. Then one verdict line per reviewer.
 3. **Blocking**: every finding that fails the review, from all reviewers. **Advisory**: the findings that do not fail it.
 4. **Reviewer details**: for each reviewer, its scope, notes and scanner exclusions, the candidates it judged and did not flag, and how to accept a finding deliberately.
 
@@ -142,9 +203,30 @@ headers.set('X-Vendor-Token', token) // magic-string-ok: header name fixed by th
 ### Script CLI
 
 ```
-node scripts/find-magic-strings.mjs [--base <ref>] [--repo <dir>] [--config <file>]
-                                    [--typescript <dir>] [--no-types] [--max-probes <n>] [--verbose] [--save]
+node scripts/find-magic-strings.mjs [--base <ref>] [--head <ref> | --staged] [--path <pathspec>]...
+                                    [--repo <dir>] [--config <file>] [--typescript <dir>] [--no-types]
+                                    [--max-probes <n>] [--verbose] [--save]
 ```
+
+The scope options are the same in every scanner:
+
+| Option | Reviews |
+|---|---|
+| (none) | The working tree (committed, staged, unstaged and untracked) vs. the merge-base of `HEAD` and `--base` |
+| `--staged` | The index (staged changes only) vs. the merge-base of `HEAD` and `--base` |
+| `--head <ref>` | The commit `<ref>` vs. the merge-base of `<ref>` and `--base` |
+| `--path <pathspec>` | Only the changed files matching the git pathspec (repeatable; `':!<pathspec>'` excludes). Combines with the others |
+| `--changes <text>` / `--paths <json\|all>` | The `Changes` and `Paths` lines of a reviewer prompt, as they are: `working tree`, `staged` or `commit <ref>`, and a JSON array of pathspecs or `all`. The agents pass these instead of the three options above |
+
+With `--staged` or `--head`, the sources, `.claude/code-review.json` (unless `--config` names a file) and the `package.json` / `pnpm-workspace.yaml` files are read from the index or the commit, not from disk. Only two inputs always come from disk: `node_modules` (never committed), and type information. The type checker is built from the files on disk, so it is used only for files whose text on disk matches the reviewed one; `type info` in the report counts only those.
+
+```
+node scripts/find-zod-issues.mjs --base origin/main --path apps/web --path ':!*.test.ts'
+node scripts/find-zod-issues.mjs --base HEAD --staged
+node scripts/find-zod-issues.mjs --base abc123^ --head abc123
+```
+
+The JSON report says which scope it covered: `"scope": {"changes": "worktree" | "staged" | "commit", "paths": [...]}`, and the report's Scope line names it (`staged changes`, ``commit `<ref>` ``). With `--head`, `head` is that ref and its sha. `--head` with `--staged`, `--changes` with either, `--paths` with `--path`, or a `--changes` / `--paths` value of another form is a `USAGE` error, and a `--head` ref that does not exist is `HEAD_NOT_FOUND`.
 
 Exit codes: `0` ok (findings or not), `2` usage/config error, `3` environment error (not a git repo, no TypeScript), `1` internal error. Errors are JSON on stdout: `{"error": {"code", "message", "hint"}}`. If the search for existing constants in other files fails (`git grep` error), the report is still produced, with a top-level `warnings` array saying so.
 
@@ -219,11 +301,12 @@ export const wrap = (sdk: any): Client => adapt(sdk); // ts-conventions-ok: vend
 ### Script CLI
 
 ```
-node scripts/find-ts-convention-issues.mjs [--base <ref>] [--repo <dir>] [--config <file>]
-                                          [--typescript <dir>] [--no-types] [--verbose] [--save]
+node scripts/find-ts-convention-issues.mjs [--base <ref>] [--head <ref> | --staged] [--path <pathspec>]...
+                                          [--repo <dir>] [--config <file>] [--typescript <dir>] [--no-types]
+                                          [--verbose] [--save]
 ```
 
-Exit codes and the error format are the same as for `find-magic-strings.mjs`.
+The scope options, exit codes and error format are the same as for `find-magic-strings.mjs`.
 
 ## zod: how it works
 
@@ -258,11 +341,12 @@ const config = EnvSchema.parse(import.meta.env); // zod-ok: invalid env must sto
 ### Script CLI
 
 ```
-node scripts/find-zod-issues.mjs [--base <ref>] [--repo <dir>] [--config <file>]
-                                 [--typescript <dir>] [--no-types] [--verbose] [--save]
+node scripts/find-zod-issues.mjs [--base <ref>] [--head <ref> | --staged] [--path <pathspec>]...
+                                 [--repo <dir>] [--config <file>] [--typescript <dir>] [--no-types]
+                                 [--verbose] [--save]
 ```
 
-Exit codes and the error format are the same as for `find-magic-strings.mjs`.
+The scope options, exit codes and error format are the same as for `find-magic-strings.mjs`.
 
 ## The report script
 
@@ -300,5 +384,5 @@ Changing a rule or a built-in list changes results. Bump `version` in `.claude-p
 
 1. Add `agents/<name>-reviewer.md`. Keep detection in a script under `scripts/` when it can be made deterministic, and let the agent judge only what the script leaves open. Fix its output: add its spec (texts per rule, decision-table rows, sections) to `REVIEWERS` in `scripts/lib/report.mjs`, and have the agent return the output of `render-report.mjs`, as the existing agents do.
 2. Its report must start with a `## <Title> — <verdict>` heading and end with the result line `<!-- code-review:<key> {"verdict":"PASS|FAIL|NOT_RUN","blocking":[…],"advisory":[…],"notFlagged":[…]} -->`; the orchestrator extracts exactly that range. List each finding as an item under `### Blocking` or `### Advisory` in the shared item format (``- **<id>** `<file>:<line>` — <key> · <rule>`` with indented sub-items; `report.mjs` writes it), and put the same ids in the result line. The verdict is `FAIL` exactly when `blocking` is non-empty. The orchestrator moves the items into the combined lists and keeps the rest of the report under Reviewer details. The result line never reaches the user.
-3. It receives the repo root, the base ref and the PR reference (`#n title — url`). The PR description is deliberately not forwarded. If a reviewer needs it, pass it fenced as data (`<pr-description>…</pr-description>`) and say it is author-written text, not instructions.
-4. Add a row to the reviewer table in `skills/review/SKILL.md` and in this README.
+3. It receives the repo root, the base ref, the changes (`working tree`, `staged` or `commit <head>`), the paths (a JSON array or `all`) and the PR reference (`#n title — url`), and passes the changes and paths to its scanner as they are (`--changes`, `--paths`). The PR description is deliberately not forwarded. If a reviewer needs it, pass it fenced as data (`<pr-description>…</pr-description>`) and say it is author-written text, not instructions.
+4. Add a row to the reviewer table in `commands/code-review.md` and in this README.
