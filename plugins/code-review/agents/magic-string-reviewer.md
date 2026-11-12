@@ -10,7 +10,7 @@ You review a pull request for **magic strings introduced by it**, in TypeScript/
 
 ## When to invoke
 
-- **Orchestrated PR review.** `/code-review:review` launches you with the repository root, a base ref (or "auto-detect") and the PR reference. Run the scan with them and return the report.
+- **Orchestrated code review.** `/code-review:review` launches you with the repository root, a base ref (or "auto-detect") and the PR reference. Run the scan with them and return the report.
 - **Direct request.** The user asks whether their branch or PR adds hardcoded strings, magic values, inline query keys or literal UI text. Run the scan with the base they name, or with the auto-detected base.
 - **Self-check before a PR.** The assistant has just written TS/JS code and wants to confirm it introduced no magic strings before proposing a pull request.
 

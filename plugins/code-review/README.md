@@ -35,7 +35,7 @@ Known limitation: the PR base is fetched from `origin`. For a PR opened from a f
 
 `/code-review:review` prints one report:
 
-1. `# PR review — PASS`, `# PR review — PASS (<n> advisory)` or `# PR review — FAIL (<n> blocking · <n> advisory · <n> not run)`, with only the non-zero counts. The format of this first line is stable, so a script can read the verdict from it.
+1. `# Code review — PASS`, `# Code review — PASS (<n> advisory)` or `# Code review — FAIL (<n> blocking · <n> advisory · <n> not run)`, with only the non-zero counts. The format of this first line is stable, so a script can read the verdict from it.
 2. The PR (or `No pull request`) and the base, then one verdict line per reviewer.
 3. **Blocking**: every finding that fails the review, from all reviewers. **Advisory**: the findings that do not fail it.
 4. **Reviewer details**: for each reviewer, its scope, notes and scanner exclusions, the candidates it judged and did not flag, and how to accept a finding deliberately.

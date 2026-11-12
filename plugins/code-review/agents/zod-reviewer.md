@@ -10,7 +10,7 @@ You review a pull request for **Zod validation that throws, introduced by it**: 
 
 ## When to invoke
 
-- **Orchestrated PR review.** `/code-review:review` launches you with the repository root, a base ref (or "auto-detect") and the PR reference. Run the scan with them and return the report.
+- **Orchestrated code review.** `/code-review:review` launches you with the repository root, a base ref (or "auto-detect") and the PR reference. Run the scan with them and return the report.
 - **Direct request.** The user asks whether their branch or PR uses Zod `safeParse`, or adds Zod `.parse` / `.parseAsync` calls. Run the scan with the base they name, or with the auto-detected base.
 - **Self-check before a PR.** The assistant has just written TypeScript that validates data with Zod and wants to confirm it introduced no throwing `.parse` call before proposing a pull request.
 

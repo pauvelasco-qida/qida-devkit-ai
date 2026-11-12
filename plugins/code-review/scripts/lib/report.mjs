@@ -10,6 +10,11 @@
  * and `### Advisory`, other sections, and the result line `<!-- code-review:<key> {...} -->`.
  */
 
+import { CONFIG_RELATIVE_PATH } from './config.mjs';
+
+/** The config file as cited in report texts. */
+const CONFIG_REF = `\`${CONFIG_RELATIVE_PATH}\``;
+
 /** @typedef {'blocking' | 'advisory' | 'notFlagged'} Section */
 
 /**
@@ -174,7 +179,7 @@ const TS_VIOLATIONS = {
   }),
   'V-DEFAULT-EXPORT': () => ({
     why: 'Default exports detach the imported name from its source.',
-    fix: 'Use a named export. If the framework requires a default export in this file, add its path to `.claude/code-review.json` → `tsConventions.defaultExportPaths`.',
+    fix: 'Use a named export. If the framework requires a default export in this file, add its path to ' + CONFIG_REF + ' → `tsConventions.defaultExportPaths`.',
   }),
   'V-INLINE-TYPE-IMPORT': (c) => ({
     why: 'Inline `type` specifiers can leave an empty side-effect import after transpilation.',
@@ -242,7 +247,7 @@ const MAGIC_STRINGS = {
   advisorySection: false,
   acceptWhen: (blocking) => blocking > 0,
   accept:
-    'To accept a literal deliberately: add `// magic-string-ok: <reason>` on its line (or on a comment-only line just above it), or list it in `.claude/code-review.json` → `magicStrings.allowValues`. A `V-SECRET` in a known credential format cannot be accepted with the marker, only through `allowValues`; a real credential must be removed from the code.',
+    'To accept a literal deliberately: add `// magic-string-ok: <reason>` on its line (or on a comment-only line just above it), or list it in ' + CONFIG_REF + ' → `magicStrings.allowValues`. A `V-SECRET` in a known credential format cannot be accepted with the marker, only through `allowValues`; a real credential must be removed from the code.',
   violation: (c) => fromTable(MAGIC_VIOLATIONS, c, 'blocking'),
   reviews: {
     REVIEW: {
@@ -274,7 +279,7 @@ const TS_CONVENTIONS = {
   advisorySection: true,
   acceptWhen: (blocking, advisory) => blocking + advisory > 0,
   accept:
-    'To accept a case deliberately: add `// ts-conventions-ok: <reason>` on its line (or on a comment-only line just above it); to switch a rule off for the repository, list it in `.claude/code-review.json` → `tsConventions.disabledRules`.',
+    'To accept a case deliberately: add `// ts-conventions-ok: <reason>` on its line (or on a comment-only line just above it); to switch a rule off for the repository, list it in ' + CONFIG_REF + ' → `tsConventions.disabledRules`.',
   violation: (c) => fromTable(TS_VIOLATIONS, c, c.severity === 'blocking' ? 'blocking' : 'advisory'),
   reviews: {
     'REVIEW-DISCRIMINATED-UNION': {
@@ -319,7 +324,7 @@ const ZOD = {
   advisorySection: false,
   acceptWhen: (blocking) => blocking > 0,
   accept:
-    'To accept a case deliberately: add `// zod-ok: <reason>` on its line (or on a comment-only line just above it); to skip whole paths, list them in `.claude/code-review.json` → `zod.ignorePaths`.',
+    'To accept a case deliberately: add `// zod-ok: <reason>` on its line (or on a comment-only line just above it); to skip whole paths, list them in ' + CONFIG_REF + ' → `zod.ignorePaths`.',
   violation: (c) =>
     fromTable(
       {

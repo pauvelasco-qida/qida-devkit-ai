@@ -6,7 +6,7 @@ disable-model-invocation: true
 allowed-tools: ["Bash(git rev-parse:*)", "Bash(git merge-base:*)", "Bash(git fetch:*)", "Bash(gh pr view:*)", "Agent"]
 ---
 
-# PR review
+# Code review
 
 Run every reviewer agent of the `code-review` plugin against one diff and print one combined report. This skill only fixes the scope, dispatches the reviewers and merges their reports. Each reviewer owns its analysis and its findings.
 
@@ -90,7 +90,7 @@ The reviewer is **not run** when any of these holds. Its verdict is then `NOT_RU
 Output exactly the following, with nothing before or after it:
 
 ```
-# PR review — <VERDICT>
+# Code review — <VERDICT>
 
 <scope line>
 
@@ -122,7 +122,7 @@ Advisory findings do not fail the review.
 Example: the combined report for three reviewer reports (synthetic data).
 
 ```
-# PR review — FAIL (2 blocking · 1 advisory)
+# Code review — FAIL (2 blocking · 1 advisory)
 
 No pull request · base `origin/main`
 
