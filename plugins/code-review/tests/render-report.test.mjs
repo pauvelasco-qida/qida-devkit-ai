@@ -77,7 +77,7 @@ const judge = (o) => new Map(Object.entries(o));
  * @param {string} report
  */
 function assertConsistent(report) {
-  const result = /<!-- pr-review:[a-z-]+ (\{.*\}) -->$/.exec(report);
+  const result = /<!-- code-review:[a-z-]+ (\{.*\}) -->$/.exec(report);
   assert.ok(result, 'ends with a result line');
   const json = JSON.parse(/** @type {string} */ (result[1]));
   /** @type {Record<string, string[]>} */
@@ -142,7 +142,7 @@ test('magic-strings: every VIOLATION text, REVIEW rows, sections and the result 
   assert.match(report, /magic-strings · R4\n {2}- Value: `` a`b ``\n/);
   assert.match(report, /### Reviewed, not flagged\n\n- \*\*MS-009\*\* `src\/a.ts:3` — magic-strings · R3\n {2}- Value: `X-Request-Id`\n {2}- Reason: Spelling imposed/);
   assert.ok(!report.includes('### Advisory'));
-  assert.match(report, /\n\nTo accept a literal deliberately: .+\n\n<!-- pr-review:magic-strings \{"verdict":"FAIL","blocking":\["MS-001",.*"MS-010"\],"advisory":\[\],"notFlagged":\["MS-009"\]\} -->$/);
+  assert.match(report, /\n\nTo accept a literal deliberately: .+\n\n<!-- code-review:magic-strings \{"verdict":"FAIL","blocking":\["MS-001",.*"MS-010"\],"advisory":\[\],"notFlagged":\["MS-009"\]\} -->$/);
 });
 
 test('magic-strings: a clean scan passes with None., notes, and no accept line', () => {
@@ -176,7 +176,7 @@ test('magic-strings: a clean scan passes with None., notes, and no accept line',
       '  - Value: `v`',
       '  - Reason: Developer-only text.',
       '',
-      '<!-- pr-review:magic-strings {"verdict":"PASS","blocking":[],"advisory":[],"notFlagged":["MS-001"]} -->',
+      '<!-- code-review:magic-strings {"verdict":"PASS","blocking":[],"advisory":[],"notFlagged":["MS-001"]} -->',
     ].join('\n'),
   );
 });
@@ -197,13 +197,13 @@ test('every reviewer: no scanned files gives the short PASS report', () => {
       '',
       'No TypeScript/JavaScript files changed.',
       '',
-      '<!-- pr-review:magic-strings {"verdict":"PASS","blocking":[],"advisory":[],"notFlagged":[]} -->',
+      '<!-- code-review:magic-strings {"verdict":"PASS","blocking":[],"advisory":[],"notFlagged":[]} -->',
     ].join('\n'),
   );
-  assert.match(renderReport('zod', scan('find-zod-issues', [], { typescript: null }), new Map()), /\n\nNo TypeScript files changed\.\n\n<!-- pr-review:zod /);
+  assert.match(renderReport('zod', scan('find-zod-issues', [], { typescript: null }), new Map()), /\n\nNo TypeScript files changed\.\n\n<!-- code-review:zod /);
   assert.match(
     renderReport('ts-conventions', scan('find-ts-convention-issues', [], { typescript: null }), new Map()),
-    /\n\nNo TypeScript files changed\.\n\n<!-- pr-review:ts-conventions /,
+    /\n\nNo TypeScript files changed\.\n\n<!-- code-review:ts-conventions /,
   );
 });
 
@@ -280,14 +280,14 @@ test('zod: blocking calls, and a clean scan with the type note', () => {
   const clean = renderReport('zod', scan('find-zod-issues', [], { typescript: { version: '6.0.3', typeInfo: 'none' } }), new Map());
   assertConsistent(clean);
   assert.match(clean, /^- Note: some files had no type information, so Zod schemas were recognised/m);
-  assert.match(clean, /### Blocking\n\nNone\.\n\n<!-- pr-review:zod \{"verdict":"PASS","blocking":\[\],"advisory":\[\],"notFlagged":\[\]\} -->$/);
+  assert.match(clean, /### Blocking\n\nNone\.\n\n<!-- code-review:zod \{"verdict":"PASS","blocking":\[\],"advisory":\[\],"notFlagged":\[\]\} -->$/);
   assert.ok(!clean.includes('To accept'));
 });
 
 test('a scanner error renders the NOT RUN report', () => {
   assert.equal(
     renderReport('zod', /** @type {any} */ ({ error: { code: 'INTERNAL', message: 'boom', hint: null } }), new Map()),
-    '## Zod validation — NOT RUN\n\n- Error: `INTERNAL` boom\n- Fix: Run the review again.\n\n<!-- pr-review:zod {"verdict":"NOT_RUN"} -->',
+    '## Zod validation — NOT RUN\n\n- Error: `INTERNAL` boom\n- Fix: Run the review again.\n\n<!-- code-review:zod {"verdict":"NOT_RUN"} -->',
   );
   assert.match(
     renderReport('magic-strings', /** @type {any} */ ({ error: { code: 'BASE_NOT_FOUND', message: 'm', hint: 'Fetch it.' } }), new Map()),
@@ -343,7 +343,7 @@ test('CLI: a scanner with --save feeds render-report end to end', (t) => {
 
   const ok = spawnSync(process.execPath, [RENDER, '--reviewer', 'magic-strings', '--scan', msOut.savedTo, '--judge', 'MS-001=R4'], { encoding: 'utf8' });
   assert.equal(ok.status, 0, ok.stderr);
-  assert.match(ok.stdout, /^## Magic strings — FAIL \(1 blocking\)\n[\s\S]*magic-strings · R4\n[\s\S]*<!-- pr-review:magic-strings \{"verdict":"FAIL","blocking":\["MS-001"\],"advisory":\[\],"notFlagged":\[\]\} -->\n$/);
+  assert.match(ok.stdout, /^## Magic strings — FAIL \(1 blocking\)\n[\s\S]*magic-strings · R4\n[\s\S]*<!-- code-review:magic-strings \{"verdict":"FAIL","blocking":\["MS-001"\],"advisory":\[\],"notFlagged":\[\]\} -->\n$/);
 
   const missing = spawnSync(process.execPath, [RENDER, '--reviewer', 'magic-strings', '--scan', msOut.savedTo], { encoding: 'utf8' });
   assert.equal(missing.status, 2);

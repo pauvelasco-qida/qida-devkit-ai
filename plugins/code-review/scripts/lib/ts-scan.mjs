@@ -194,7 +194,7 @@ export function parseScanArgs(argv, defaults = {}) {
   if (!Number.isSafeInteger(maxProbes) || maxProbes < 0) {
     throw new ScannerError('USAGE', '--max-probes must be an integer >= 0.', 2);
   }
-  const envTs = process.env.PR_REVIEW_TYPESCRIPT;
+  const envTs = process.env.CODE_REVIEW_TYPESCRIPT;
   return {
     base: typeof v.base === 'string' ? v.base : null,
     repo: typeof v.repo === 'string' ? v.repo : process.cwd(),

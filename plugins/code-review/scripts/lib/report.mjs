@@ -5,9 +5,9 @@
  * included. Every fixed text of a report lives here, so an agent never copies or formats one and
  * the same scan plus the same judgments always render the same bytes.
  *
- * The report shape is the contract with `/pr-review:review` (skills/review/SKILL.md, step 3):
+ * The report shape is the contract with `/code-review:review` (skills/review/SKILL.md, step 3):
  * a `## <Title> — <verdict>` heading, a summary list, findings as list items under `### Blocking`
- * and `### Advisory`, other sections, and the result line `<!-- pr-review:<key> {...} -->`.
+ * and `### Advisory`, other sections, and the result line `<!-- code-review:<key> {...} -->`.
  */
 
 /** @typedef {'blocking' | 'advisory' | 'notFlagged'} Section */
@@ -174,7 +174,7 @@ const TS_VIOLATIONS = {
   }),
   'V-DEFAULT-EXPORT': () => ({
     why: 'Default exports detach the imported name from its source.',
-    fix: 'Use a named export. If the framework requires a default export in this file, add its path to `.claude/pr-review.json` → `tsConventions.defaultExportPaths`.',
+    fix: 'Use a named export. If the framework requires a default export in this file, add its path to `.claude/code-review.json` → `tsConventions.defaultExportPaths`.',
   }),
   'V-INLINE-TYPE-IMPORT': (c) => ({
     why: 'Inline `type` specifiers can leave an empty side-effect import after transpilation.',
@@ -242,7 +242,7 @@ const MAGIC_STRINGS = {
   advisorySection: false,
   acceptWhen: (blocking) => blocking > 0,
   accept:
-    'To accept a literal deliberately: add `// magic-string-ok: <reason>` on its line (or on a comment-only line just above it), or list it in `.claude/pr-review.json` → `magicStrings.allowValues`. A `V-SECRET` in a known credential format cannot be accepted with the marker, only through `allowValues`; a real credential must be removed from the code.',
+    'To accept a literal deliberately: add `// magic-string-ok: <reason>` on its line (or on a comment-only line just above it), or list it in `.claude/code-review.json` → `magicStrings.allowValues`. A `V-SECRET` in a known credential format cannot be accepted with the marker, only through `allowValues`; a real credential must be removed from the code.',
   violation: (c) => fromTable(MAGIC_VIOLATIONS, c, 'blocking'),
   reviews: {
     REVIEW: {
@@ -274,7 +274,7 @@ const TS_CONVENTIONS = {
   advisorySection: true,
   acceptWhen: (blocking, advisory) => blocking + advisory > 0,
   accept:
-    'To accept a case deliberately: add `// ts-conventions-ok: <reason>` on its line (or on a comment-only line just above it); to switch a rule off for the repository, list it in `.claude/pr-review.json` → `tsConventions.disabledRules`.',
+    'To accept a case deliberately: add `// ts-conventions-ok: <reason>` on its line (or on a comment-only line just above it); to switch a rule off for the repository, list it in `.claude/code-review.json` → `tsConventions.disabledRules`.',
   violation: (c) => fromTable(TS_VIOLATIONS, c, c.severity === 'blocking' ? 'blocking' : 'advisory'),
   reviews: {
     'REVIEW-DISCRIMINATED-UNION': {
@@ -319,7 +319,7 @@ const ZOD = {
   advisorySection: false,
   acceptWhen: (blocking) => blocking > 0,
   accept:
-    'To accept a case deliberately: add `// zod-ok: <reason>` on its line (or on a comment-only line just above it); to skip whole paths, list them in `.claude/pr-review.json` → `zod.ignorePaths`.',
+    'To accept a case deliberately: add `// zod-ok: <reason>` on its line (or on a comment-only line just above it); to skip whole paths, list them in `.claude/code-review.json` → `zod.ignorePaths`.',
   violation: (c) =>
     fromTable(
       {
@@ -411,7 +411,7 @@ function item(spec, c, row, v) {
  * @param {string} key
  * @param {object} result
  */
-const resultLine = (key, result) => `<!-- pr-review:${key} ${JSON.stringify(result)} -->`;
+const resultLine = (key, result) => `<!-- code-review:${key} ${JSON.stringify(result)} -->`;
 
 /**
  * The reviewer's report for a scanner error.

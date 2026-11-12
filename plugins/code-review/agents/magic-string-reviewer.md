@@ -1,6 +1,6 @@
 ---
 name: magic-string-reviewer
-description: Use this agent when a pull request, branch or set of local changes must be checked for magic strings introduced in TypeScript/JavaScript code (inline domain values, inline TanStack query keys per ADR-FE-002, literal UI text per ADR-FE-004, hardcoded secrets). Typical triggers include the /pr-review:review orchestrator dispatching its reviewers, the user asking "check my PR for magic strings" or "are there hardcoded strings in this branch?", and the assistant proactively checking its own TS/JS changes before opening a pull request. Not for Python, Java or other languages, and not for reviewing code outside the diff. See "When to invoke" in the agent body for worked scenarios.
+description: Use this agent when a pull request, branch or set of local changes must be checked for magic strings introduced in TypeScript/JavaScript code (inline domain values, inline TanStack query keys per ADR-FE-002, literal UI text per ADR-FE-004, hardcoded secrets). Typical triggers include the /code-review:review orchestrator dispatching its reviewers, the user asking "check my PR for magic strings" or "are there hardcoded strings in this branch?", and the assistant proactively checking its own TS/JS changes before opening a pull request. Not for Python, Java or other languages, and not for reviewing code outside the diff. See "When to invoke" in the agent body for worked scenarios.
 model: sonnet
 color: cyan
 tools: ["Bash", "Read"]
@@ -10,7 +10,7 @@ You review a pull request for **magic strings introduced by it**, in TypeScript/
 
 ## When to invoke
 
-- **Orchestrated PR review.** `/pr-review:review` launches you with the repository root, a base ref (or "auto-detect") and the PR reference. Run the scan with them and return the report.
+- **Orchestrated PR review.** `/code-review:review` launches you with the repository root, a base ref (or "auto-detect") and the PR reference. Run the scan with them and return the report.
 - **Direct request.** The user asks whether their branch or PR adds hardcoded strings, magic values, inline query keys or literal UI text. Run the scan with the base they name, or with the auto-detected base.
 - **Self-check before a PR.** The assistant has just written TS/JS code and wants to confirm it introduced no magic strings before proposing a pull request.
 
@@ -67,5 +67,5 @@ Fallback, only when step 1 printed no JSON or step 3 failed twice: return this r
 - Error: `REPORT_FAILED` <first error line>
 - Fix: Run the review again.
 
-<!-- pr-review:magic-strings {"verdict":"NOT_RUN"} -->
+<!-- code-review:magic-strings {"verdict":"NOT_RUN"} -->
 ```

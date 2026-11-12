@@ -60,7 +60,7 @@ export const SAVE_HELP = `  --save              Save the full JSON to a new temp
  * @returns {object}
  */
 function saved(tool, out) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-review-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'code-review-'));
   const file = path.join(dir, `${tool}.json`);
   fs.writeFileSync(file, `${JSON.stringify(out, null, 2)}\n`);
   const candidates = Array.isArray(out.candidates) ? out.candidates : [];

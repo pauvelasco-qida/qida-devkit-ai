@@ -1,6 +1,6 @@
 ---
 name: review
-description: This skill should be used when the user invokes /pr-review:review to run every pr-review reviewer agent on the current branch, a checked-out pull request (number or URL) or an explicit base ref, and print one combined report. The report gives an overall PASS/FAIL verdict and lists every finding once, blocking findings first.
+description: This skill should be used when the user invokes /code-review:review to run every code-review reviewer agent on the current branch, a checked-out pull request (number or URL) or an explicit base ref, and print one combined report. The report gives an overall PASS/FAIL verdict and lists every finding once, blocking findings first.
 argument-hint: "[PR number | PR URL | base ref] [--effort low|medium|high|xhigh|max]"
 disable-model-invocation: true
 allowed-tools: ["Bash(git rev-parse:*)", "Bash(git merge-base:*)", "Bash(git fetch:*)", "Bash(gh pr view:*)", "Agent"]
@@ -8,7 +8,7 @@ allowed-tools: ["Bash(git rev-parse:*)", "Bash(git merge-base:*)", "Bash(git fet
 
 # PR review
 
-Run every reviewer agent of the `pr-review` plugin against one diff and print one combined report. This skill only fixes the scope, dispatches the reviewers and merges their reports. Each reviewer owns its analysis and its findings.
+Run every reviewer agent of the `code-review` plugin against one diff and print one combined report. This skill only fixes the scope, dispatches the reviewers and merges their reports. Each reviewer owns its analysis and its findings.
 
 **Argument:** `$ARGUMENTS`
 
@@ -20,9 +20,9 @@ Start Step 1 as soon as the skill is invoked. Do not summarise this skill, annou
 
 | Key | Agent (`subagent_type`) | What it checks |
 |---|---|---|
-| `magic-strings` | `pr-review:magic-string-reviewer` | No magic strings introduced in TS/JS (ADR-FE-002, ADR-FE-004) |
-| `ts-conventions` | `pr-review:ts-conventions-reviewer` | New TypeScript follows the conventions (ADR-FE-001); only blocking rules fail |
-| `zod` | `pr-review:zod-reviewer` | New Zod validation uses `safeParse` / `safeParseAsync`, never `parse` / `parseAsync` |
+| `magic-strings` | `code-review:magic-string-reviewer` | No magic strings introduced in TS/JS (ADR-FE-002, ADR-FE-004) |
+| `ts-conventions` | `code-review:ts-conventions-reviewer` | New TypeScript follows the conventions (ADR-FE-001); only blocking rules fail |
+| `zod` | `code-review:zod-reviewer` | New Zod validation uses `safeParse` / `safeParseAsync`, never `parse` / `parseAsync` |
 
 ## Steps
 
@@ -38,12 +38,12 @@ Reviewers always compare **the working tree** (committed, uncommitted and untrac
 3. Trim what is left of the argument and classify it:
    - matches `^#?[0-9]+$` or `^https://github\.com/[^/]+/[^/]+/pull/[0-9]+` → **PR**; `<n>` is the number (without `#`).
    - empty → **auto**.
-   - starts with `-` (an unknown or mistyped option; no git ref starts with `-`) → output exactly ``Unknown option: <what is left>. Usage: /pr-review:review [PR number | PR URL | base ref] [--effort low|medium|high|xhigh|max]`` and stop.
+   - starts with `-` (an unknown or mistyped option; no git ref starts with `-`) → output exactly ``Unknown option: <what is left>. Usage: /code-review:review [PR number | PR URL | base ref] [--effort low|medium|high|xhigh|max]`` and stop.
    - anything else → **base ref**, used exactly as given.
 
 **PR**
 1. `gh pr view <n> --json number,title,baseRefName,headRefOid,url`. If it fails, output `Could not read PR <n>: <first line of the error>` and stop. Do not fall back to another mode.
-2. `git merge-base --is-ancestor <headRefOid> HEAD`. If it fails, the PR is not checked out here: output exactly ``PR #<number> is not checked out here. Run `gh pr checkout <number>` and invoke /pr-review:review <number> again.`` and stop. Do not check it out yourself. (Local commits on top of the PR head are allowed.)
+2. `git merge-base --is-ancestor <headRefOid> HEAD`. If it fails, the PR is not checked out here: output exactly ``PR #<number> is not checked out here. Run `gh pr checkout <number>` and invoke /code-review:review <number> again.`` and stop. Do not check it out yourself. (Local commits on top of the PR head are allowed.)
 3. `git fetch --quiet origin <baseRefName>`. If it fails, output `Could not fetch origin/<baseRefName>: <first line of the error>` and stop. Base ref = `origin/<baseRefName>`. PR = `#<number> <title> — <url>`.
 
 **auto**: `gh pr view --json number,title,baseRefName,url,state`. If it succeeds and `state` is `OPEN`, run PR step 3 with its `baseRefName`, and PR = `#<number> <title> — <url>`. Otherwise base ref = `auto-detect` and PR = `none`; fetch nothing.
@@ -67,7 +67,7 @@ Wait until every reviewer has returned before Step 3. When they run in the backg
 
 #### 3a. Read each reviewer's result
 
-Every reviewer returns a report in the same shape, written by the plugin's `scripts/render-report.mjs`: a `## <Title> — <verdict>` heading, a summary list, its findings as list items under `### Blocking` and `### Advisory`, other sections, and a **result line** `<!-- pr-review:<key> {...} -->` at the end. For each reviewer, take:
+Every reviewer returns a report in the same shape, written by the plugin's `scripts/render-report.mjs`: a `## <Title> — <verdict>` heading, a summary list, its findings as list items under `### Blocking` and `### Advisory`, other sections, and a **result line** `<!-- code-review:<key> {...} -->` at the end. For each reviewer, take:
 
 - **Report**: the text of its Agent result from the first line starting with `## ` through its result line, inclusive. Discard anything outside that range.
 - **Verdict**: the `verdict` field of the result line's JSON. A missing `blocking` or `advisory` array counts as empty.
@@ -82,7 +82,7 @@ The reviewer is **not run** when any of these holds. Its verdict is then `NOT_RU
 ## <key> — NOT RUN
 
 - Error: <error>
-- Fix: Run /pr-review:review again.
+- Fix: Run /code-review:review again.
 ```
 
 #### 3b. Print the combined report
@@ -164,14 +164,14 @@ Advisory findings do not fail the review.
   - Value: `X-Request-Id` (headers.set() arg 1)
   - Reason: Spelling imposed by an external spec or library API.
 
-To accept a literal deliberately: add `// magic-string-ok: <reason>` on its line (or on a comment-only line just above it), or list it in `.claude/pr-review.json` → `magicStrings.allowValues`. A `V-SECRET` in a known credential format cannot be accepted with the marker, only through `allowValues`; a real credential must be removed from the code.
+To accept a literal deliberately: add `// magic-string-ok: <reason>` on its line (or on a comment-only line just above it), or list it in `.claude/code-review.json` → `magicStrings.allowValues`. A `V-SECRET` in a known credential format cannot be accepted with the marker, only through `allowValues`; a real credential must be removed from the code.
 
 ### TypeScript conventions — FAIL (1 blocking)
 
 - Scope: `origin/main` (merge-base `1a2b3c4`) → `feat/orders` · 9 files scanned · 2 skipped · type info: full
 - Excluded by the scanner: 0 items
 
-To accept a case deliberately: add `// ts-conventions-ok: <reason>` on its line (or on a comment-only line just above it); to switch a rule off for the repository, list it in `.claude/pr-review.json` → `tsConventions.disabledRules`.
+To accept a case deliberately: add `// ts-conventions-ok: <reason>` on its line (or on a comment-only line just above it); to switch a rule off for the repository, list it in `.claude/code-review.json` → `tsConventions.disabledRules`.
 
 ### Zod validation — PASS
 

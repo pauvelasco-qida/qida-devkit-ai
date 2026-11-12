@@ -33,8 +33,8 @@ Lists TypeScript convention breaches introduced in the working tree (vs. the mer
 Options:
   --base <ref>        Base branch/ref (default: origin/HEAD, then origin/main|master|develop, main|master|develop)
   --repo <dir>        Repository directory (default: current directory)
-  --config <file>     Config file (default: <repo>/.claude/pr-review.json)
-  --typescript <dir>  typescript package directory (default: auto; env PR_REVIEW_TYPESCRIPT)
+  --config <file>     Config file (default: <repo>/.claude/code-review.json)
+  --typescript <dir>  typescript package directory (default: auto; env CODE_REVIEW_TYPESCRIPT)
   --no-types          Do not build the type checker (faster; the intersection rule falls back to syntax)
   --verbose           Also list excluded items
   -h, --help          Show this help

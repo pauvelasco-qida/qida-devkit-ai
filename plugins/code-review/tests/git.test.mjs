@@ -19,7 +19,7 @@ test('grepFiles passes any number of needles on stdin and finds every match', (t
 });
 
 test('grepFiles fails loudly when git grep itself fails', (t) => {
-  const notRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-review-norepo-'));
+  const notRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'code-review-norepo-'));
   t.after(() => fs.rmSync(notRepo, { recursive: true, force: true }));
   assert.throws(() => grepFiles(notRepo, ["'x'"], ['*.ts']), (/** @type {any} */ e) => {
     assert.equal(e.code, 'GIT_GREP_FAILED');

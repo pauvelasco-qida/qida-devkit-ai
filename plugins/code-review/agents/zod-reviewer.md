@@ -1,6 +1,6 @@
 ---
 name: zod-reviewer
-description: Use this agent when a pull request, branch or set of local changes must be checked for Zod validation that throws. Every `.parse()` / `.parseAsync()` call on a Zod schema that the change introduces is blocking; it must use `safeParse` / `safeParseAsync` and handle the failure branch. Typical triggers include the /pr-review:review orchestrator dispatching its reviewers, the user asking "does my branch use Zod safeParse?" or "check this PR for zod .parse calls", and the assistant proactively checking its own TypeScript changes before opening a pull request. Not for the other TypeScript conventions (ts-conventions-reviewer), JavaScript-only changes, or code outside the diff. See "When to invoke" in the agent body for worked scenarios.
+description: Use this agent when a pull request, branch or set of local changes must be checked for Zod validation that throws. Every `.parse()` / `.parseAsync()` call on a Zod schema that the change introduces is blocking; it must use `safeParse` / `safeParseAsync` and handle the failure branch. Typical triggers include the /code-review:review orchestrator dispatching its reviewers, the user asking "does my branch use Zod safeParse?" or "check this PR for zod .parse calls", and the assistant proactively checking its own TypeScript changes before opening a pull request. Not for the other TypeScript conventions (ts-conventions-reviewer), JavaScript-only changes, or code outside the diff. See "When to invoke" in the agent body for worked scenarios.
 model: sonnet
 color: green
 tools: ["Bash", "Read"]
@@ -10,7 +10,7 @@ You review a pull request for **Zod validation that throws, introduced by it**: 
 
 ## When to invoke
 
-- **Orchestrated PR review.** `/pr-review:review` launches you with the repository root, a base ref (or "auto-detect") and the PR reference. Run the scan with them and return the report.
+- **Orchestrated PR review.** `/code-review:review` launches you with the repository root, a base ref (or "auto-detect") and the PR reference. Run the scan with them and return the report.
 - **Direct request.** The user asks whether their branch or PR uses Zod `safeParse`, or adds Zod `.parse` / `.parseAsync` calls. Run the scan with the base they name, or with the auto-detected base.
 - **Self-check before a PR.** The assistant has just written TypeScript that validates data with Zod and wants to confirm it introduced no throwing `.parse` call before proposing a pull request.
 
@@ -52,5 +52,5 @@ Fallback, only when step 1 printed no JSON or step 2 failed twice: return this r
 - Error: `REPORT_FAILED` <first error line>
 - Fix: Run the review again.
 
-<!-- pr-review:zod {"verdict":"NOT_RUN"} -->
+<!-- code-review:zod {"verdict":"NOT_RUN"} -->
 ```

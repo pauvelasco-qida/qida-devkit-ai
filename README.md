@@ -61,4 +61,4 @@ Verify with `/hello-qida`.
 | `qida-dev` | Core development conventions and commands for Qida apps |
 | `qida-base` | QidaBase local-dev commands: faker dev stack and ScreeningCall DB operations |
 | `git-guard` | Branch protection: blocks pushes to main/master/develop from Claude and installs a reusable git pre-push hook |
-| `pr-review` | PR reviewer agents backed by deterministic scanners: magic strings in TS/JS (ADR-FE-002, ADR-FE-004), TypeScript conventions (ADR-FE-001) and Zod validation (`safeParse`, never `parse`) |
+| `code-review` | PR reviewer agents backed by deterministic scanners: magic strings in TS/JS (ADR-FE-002, ADR-FE-004), TypeScript conventions (ADR-FE-001) and Zod validation (`safeParse`, never `parse`) |
